@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/authStore';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Loader2, Activity, Target, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -243,7 +243,7 @@ const StudentAnalysis = () => {
 
                             <Link to="/student/practice">
                                 <button className="w-full rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
-                                    View Practice Questions →
+                                    View Practice Questions <ArrowRight className="inline w-4 h-4 ml-2" />
                                 </button>
                             </Link>
                         </div>

@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, CheckCircle, XCircle } from "lucide-react";
 import api from "../../utils/api";
+import CodeEditor from "../../components/CodeEditor";
+import { buildStarterCode } from "../../utils/codeStarter";
 
 const MISTAKE_KEY = "practice-mistakes-v1";
 const MASTERED_KEY = "practice-mastered-v1";
@@ -41,6 +43,14 @@ const markQuizMastered = (quizId) => {
   localStorage.setItem(MASTERED_KEY, JSON.stringify(mastered));
 };
 
+const formatLanguageLabel = (language) => {
+  const normalized = String(language || "javascript").trim().toLowerCase();
+  if (normalized === "js") return "JavaScript";
+  if (normalized === "cpp") return "C++";
+  if (normalized === "py") return "Python";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
 const PracticeQuiz = () => {
   const { id } = useParams();
   const [payload, setPayload] = useState(null);
@@ -52,6 +62,7 @@ const PracticeQuiz = () => {
   const [result, setResult] = useState(null);
   const [runResults, setRunResults] = useState({});
   const [runLoading, setRunLoading] = useState(false);
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false);
 
   useEffect(() => {
     const fetchQuiz = async () => {
@@ -71,8 +82,11 @@ const PracticeQuiz = () => {
   const questions = payload?.questions || [];
   const quiz = payload?.quiz;
   const currentQ = questions[currentIndex];
+  const starterCode = currentQ?.type === "code" ? buildStarterCode(currentQ.language, currentQ.functionName) : "";
+  const isLastQuestion = currentIndex === questions.length - 1;
 
   const answeredCount = useMemo(() => Object.keys(answers).length, [answers]);
+  const unansweredCount = Math.max(questions.length - answeredCount, 0);
 
   const setMcqAnswer = (questionId, optionId) => {
     setAnswers((prev) => ({
@@ -96,7 +110,7 @@ const PracticeQuiz = () => {
 
   const handleRunCode = async () => {
     if (!currentQ || currentQ.type !== "code") return;
-    const code = answers[currentQ.id]?.code || "";
+    const code = answers[currentQ.id]?.code ?? starterCode;
 
     if (!code.trim()) {
       setRunResults((prev) => ({
@@ -309,27 +323,32 @@ const PracticeQuiz = () => {
           <div>
             <p className="text-xs uppercase tracking-wider text-gray-500">Question {currentIndex + 1} of {questions.length}</p>
             <p className="text-lg mt-1">{currentQ.title}</p>
-            <p className="text-xs text-gray-400 mt-1">Topic: {currentQ.topic || "General"}</p>
+            <div className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+              <span>Topic: {currentQ.topic || "General"}</span>
+              {currentQ.type === "code" ? (
+                <span className="px-2 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 uppercase tracking-wide">
+                  Language: {formatLanguageLabel(currentQ.language)}
+                </span>
+              ) : null}
+              {currentQ.type === "code" ? (
+                <span className="px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 uppercase tracking-wide">
+                  Function: {currentQ.functionName || "solution"}
+                </span>
+              ) : null}
+            </div>
           </div>
 
           {currentQ.type === "code" ? (
             <div className="space-y-3">
-              <textarea
-                value={answers[currentQ.id]?.code || ""}
-                onChange={(e) => setCodeAnswer(currentQ.id, e.target.value)}
-                rows={12}
-                placeholder="Write your solution here..."
-                className="w-full rounded-lg bg-gray-950 border border-gray-800 p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-
-              <div className="flex justify-end">
-                <button
-                  onClick={handleRunCode}
-                  disabled={runLoading}
-                  className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-sm font-semibold disabled:opacity-60"
-                >
-                  {runLoading ? "Running..." : "Run Code"}
-                </button>
+              <div className="border border-gray-800 rounded-lg overflow-hidden">
+                <CodeEditor
+                  language={currentQ.language || "javascript"}
+                  code={answers[currentQ.id]?.code ?? starterCode}
+                  setCode={(val) => setCodeAnswer(currentQ.id, val || "")}
+                  template={starterCode}
+                  width="100%"
+                  height="360px"
+                />
               </div>
 
               {runResults[currentQ.id] && (
@@ -397,24 +416,62 @@ const PracticeQuiz = () => {
                 </button>
               ) : null}
 
+              {!isLastQuestion ? (
+                <button
+                  onClick={() => setCurrentIndex((i) => Math.min(questions.length - 1, i + 1))}
+                  className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold"
+                >
+                  Next
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowFinishConfirm(true)}
+                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-700 text-sm font-semibold"
+                >
+                  Finish Practice
+                </button>
+              )}
+            </div>
+          </div>
+
+          {!isLastQuestion ? (
+            <p className="text-xs text-gray-500">
+              Tip: Finish is available on the last question to avoid accidental submission.
+            </p>
+          ) : null}
+        </div>
+      )}
+
+      {showFinishConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-700 bg-gray-900 p-5 space-y-4">
+            <h2 className="text-lg font-semibold">Finish Practice?</h2>
+            <p className="text-sm text-gray-300">
+              You have answered {answeredCount}/{questions.length} questions.
+              {unansweredCount > 0 ? ` ${unansweredCount} question(s) are still unanswered.` : ""}
+            </p>
+            <p className="text-xs text-gray-500">Practice mode only: this attempt will not be saved to official history.</p>
+
+            <div className="flex justify-end gap-2 pt-2">
               <button
-                onClick={() => setCurrentIndex((i) => Math.min(questions.length - 1, i + 1))}
-                disabled={currentIndex === questions.length - 1}
-                className="px-4 py-2 rounded bg-gray-800 text-sm disabled:opacity-50"
+                onClick={() => setShowFinishConfirm(false)}
+                className="px-4 py-2 rounded bg-gray-800 hover:bg-gray-700 text-sm"
               >
-                Next
+                Keep Practicing
+              </button>
+              <button
+                onClick={() => {
+                  setShowFinishConfirm(false);
+                  handleSubmitPractice();
+                }}
+                className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-700 text-sm font-semibold"
+              >
+                Finish Anyway
               </button>
             </div>
           </div>
         </div>
-      )}
-
-      <button
-        onClick={handleSubmitPractice}
-        className="w-full rounded-lg bg-indigo-600 hover:bg-indigo-700 py-3 font-semibold"
-      >
-        Finish Practice (No Save)
-      </button>
+      ) : null}
     </div>
   );
 };

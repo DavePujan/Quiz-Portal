@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useContext } from "react";
-import { AuthContext } from "../../context/AuthContext";
+import { Trophy, Medal } from "lucide-react";
+import { AuthContext } from "../../context/authStore";
 import api from "../../utils/api";
 
 const Leaderboard = () => {
@@ -42,7 +43,7 @@ const Leaderboard = () => {
     return (
         <div className="bg-[#1a1a1a] min-h-screen text-white p-8">
             <h1 className="text-3xl font-bold mb-6 flex items-center">
-                <span className="text-yellow-500 mr-2">🏆</span> Leaderboard
+                <Trophy className="w-8 h-8 text-yellow-500 mr-2" /> Leaderboard
             </h1>
 
             <div className="mb-8">
@@ -79,7 +80,7 @@ const Leaderboard = () => {
                             leaderboard.map((entry, index) => (
                                 <tr key={index} className="border-t border-gray-700 hover:bg-[#333]">
                                     <td className="p-4">
-                                        {index + 1 === 1 ? '🥇' : index + 1 === 2 ? '🥈' : index + 1 === 3 ? '🥉' : `#${index + 1}`}
+                                        {index + 1 === 1 ? <Medal className="w-5 h-5 text-yellow-400 inline" /> : index + 1 === 2 ? <Medal className="w-5 h-5 text-gray-400 inline" /> : index + 1 === 3 ? <Medal className="w-5 h-5 text-amber-600 inline" /> : `#${index + 1}`}
                                     </td>
                                     <td className="p-4 font-mono text-green-400">{entry.username}</td>
                                     <td className="p-4 font-bold">{entry.score}</td>

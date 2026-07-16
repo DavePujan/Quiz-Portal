@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
+import { ChevronDown, AlertCircle, Settings } from "lucide-react";
+
+import api, { getAiProviders } from "../../utils/api";
 
 export default function EvaluationViewer() {
     const { id } = useParams();
@@ -7,11 +10,36 @@ export default function EvaluationViewer() {
     const [loading, setLoading] = useState(false);
     const [liveSeconds, setLiveSeconds] = useState(null);
 
+    const [providers, setProviders] = useState([]);
+    const [selectedProvider, setSelectedProvider] = useState("gemini");
+    const [providersLoading, setProvidersLoading] = useState(true);
+
+    const DEFAULT_MODELS = {
+        gemini: "gemini-2.5-flash",
+        openrouter: "google/gemma-4-31b-it:free",
+        cerebras: "gpt-oss-120b",
+        mistral: "mistral-small-latest"
+    };
+
+    useEffect(() => {
+        getAiProviders()
+            .then(res => {
+                setProviders(res.data.providers);
+                const configured = res.data.providers.find(p => p.configured);
+                if (configured) setSelectedProvider(configured.id);
+            })
+            .catch(err => console.error("Provider check failed", err))
+            .finally(() => setProvidersLoading(false));
+    }, []);
+
+    const currentProvider = providers.find(p => p.id === selectedProvider);
+    const isConfigured = currentProvider?.configured ?? false;
+    const configuredProviders = providers.filter(p => p.configured);
+    const hasConfiguredProviders = configuredProviders.length > 0;
+
     // Mock getSubmissions
     async function getSubmissions() {
-        return fetch(`http://localhost:5000/api/teacher/evaluation/${id}`, {
-            credentials: "include"
-        }).then(r => r.json()).then(d => ({ data: d }));
+        return api.get(`/api/teacher/evaluation/${id}`);
     }
 
     useEffect(() => {
@@ -54,26 +82,23 @@ export default function EvaluationViewer() {
     };
 
     const handleAutoEvaluate = async () => {
+        if (!isConfigured) return alert("Please configure an AI provider first.");
         if (!confirm("Run Auto-Evaluation? This will use AI and Judge0 to grade code questions.")) return;
         setLoading(true);
         try {
-            const res = await fetch(`http://localhost:5000/api/teacher/evaluate/${id}`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                credentials: "include"
+            const res = await api.post(`/api/teacher/evaluate/${id}`, {
+                provider: selectedProvider,
+                model: DEFAULT_MODELS[selectedProvider]
             });
-            const data = await res.json();
-            if (res.ok) {
-                alert("Auto-Evaluation Complete!");
-                window.location.reload(); // Refresh to see scores
-            } else {
-                alert("Error: " + data.error);
-            }
+            alert("Auto-Evaluation Complete!");
+            window.location.reload(); // Refresh to see scores
         } catch (err) {
             console.error(err);
-            alert("Failed to connect to server.");
+            if (err.response && err.response.data && err.response.data.error) {
+                alert("Error: " + err.response.data.error);
+            } else {
+                alert("Failed to connect to server.");
+            }
         } finally {
             setLoading(false);
         }
@@ -96,13 +121,45 @@ export default function EvaluationViewer() {
                                 <p className="text-xs text-gray-500">Quiz Duration: {submission.quizDurationMinutes} min</p>
                             )}
                         </div>
-                        <button
-                            onClick={handleAutoEvaluate}
-                            disabled={loading}
-                            className={`px-4 py-2 rounded text-white font-medium ${loading ? "bg-gray-600" : "bg-purple-600 hover:bg-purple-700"}`}
-                        >
-                            {loading ? "Evaluating..." : "Auto Evaluate with AI"}
-                        </button>
+                        <div className="flex flex-col items-end gap-2">
+                            {providersLoading ? (
+                                <span className="text-sm text-gray-500">Loading AI...</span>
+                            ) : (
+                                <>
+                                    {hasConfiguredProviders ? (
+                                        <div className="flex items-center gap-2">
+                                            <div className="relative">
+                                                <select
+                                                    value={selectedProvider}
+                                                    onChange={(e) => setSelectedProvider(e.target.value)}
+                                                    className="appearance-none bg-[#2a2a2b] border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500 cursor-pointer pr-8"
+                                                >
+                                                    {configuredProviders.map(p => (
+                                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                                    ))}
+                                                </select>
+                                                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                                            </div>
+                                            <button
+                                                onClick={handleAutoEvaluate}
+                                                disabled={loading || !isConfigured}
+                                                className={`px-4 py-2 rounded text-white font-medium whitespace-nowrap ${loading || !isConfigured ? "bg-gray-600" : "bg-purple-600 hover:bg-purple-700"}`}
+                                            >
+                                                {loading ? "Evaluating..." : "Auto Evaluate with AI"}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 bg-yellow-900/20 border border-yellow-700/50 px-3 py-2 rounded text-sm text-yellow-200">
+                                            <AlertCircle className="w-4 h-4" />
+                                            <span>No AI Configured</span>
+                                            <Link to="/teacher/settings" className="flex items-center gap-1 ml-2 text-yellow-400 hover:text-yellow-300 underline">
+                                                <Settings className="w-4 h-4" /> Settings
+                                            </Link>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
                     </div>
 
                     <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -194,21 +251,13 @@ export default function EvaluationViewer() {
                             }));
 
                             try {
-                                const res = await fetch(`http://localhost:5000/api/teacher/evaluation/${id}/finalize`, {
-                                    method: "POST",
-                                    headers: {
-                                        "Content-Type": "application/json"
-                                    },
-                                    credentials: "include",
-                                    body: JSON.stringify({ marks: updates })
-                                });
-                                if (res.ok) {
-                                    alert("Evaluated Successfully!");
-                                    window.location.href = "/teacher/evaluations";
-                                } else {
-                                    alert("Failed!");
-                                }
-                            } catch (e) { console.error(e); }
+                                await api.post(`/api/teacher/evaluation/${id}/finalize`, { marks: updates });
+                                alert("Evaluated Successfully!");
+                                window.location.href = "/teacher/evaluations";
+                            } catch (e) { 
+                                console.error(e);
+                                alert("Failed to finalize evaluation!");
+                            }
                         }}
                     >
                         Finalize & Submit

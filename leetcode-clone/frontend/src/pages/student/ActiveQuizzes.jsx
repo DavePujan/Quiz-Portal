@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useContext } from "react";
 import { Link } from "react-router-dom";
-import { AuthContext } from "../../context/AuthContext";
+import { AuthContext } from "../../context/authStore";
 import api from "../../utils/api";
 
 const ActiveQuizzes = () => {

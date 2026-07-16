@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useContext } from "react";
 import { Link } from "react-router-dom";
-import { AuthContext } from "../../context/AuthContext";
+import { Search, RefreshCw, BarChart2 } from "lucide-react";
+import { AuthContext } from "../../context/authStore";
 import api from "../../utils/api";
 
 const History = () => {
@@ -44,15 +45,15 @@ const History = () => {
                         placeholder="Search"
                         className="bg-[#252526] text-white border border-gray-700 px-4 py-2 rounded-md w-full md:w-64 focus:outline-none focus:border-blue-500 transition-colors"
                     />
-                    <span className="absolute right-3 top-2 text-gray-400">🔍</span>
+                    <Search className="absolute right-3 top-2.5 text-gray-400 w-5 h-5" />
                 </div>
 
                 <div className="flex gap-2 w-full md:w-auto">
                     <button className="flex-1 md:flex-none justify-center bg-gray-800 hover:bg-gray-700 text-white border border-gray-700 px-4 py-2 rounded flex items-center gap-2 transition-colors">
-                        <span>🔄</span> Refresh
+                        <RefreshCw className="w-4 h-4" /> Refresh
                     </button>
                     <button className="flex-1 md:flex-none justify-center bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded flex items-center gap-2 transition-colors shadow-lg shadow-green-900/20">
-                        <span>📊</span> Export
+                        <BarChart2 className="w-4 h-4" /> Export
                     </button>
                 </div>
             </div>

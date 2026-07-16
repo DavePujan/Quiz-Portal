@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, ChevronRight, Layers3 } from "lucide-react";
-import { useAuth } from "../../context/AuthContext";
+import { useAuth } from "../../context/authStore";
 import { getStudentRecommendations, getStudentRecommendationsV2 } from "../../utils/api";
 
 const MISTAKE_KEY = "practice-mistakes-v1";

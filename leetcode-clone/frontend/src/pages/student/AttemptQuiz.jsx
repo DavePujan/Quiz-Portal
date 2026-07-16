@@ -1,9 +1,10 @@
-
 import { useState, useEffect, useContext, useRef } from "react";
+import { Play, CheckCircle, XCircle, X } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
-import { AuthContext } from "../../context/AuthContext";
+import { AuthContext } from "../../context/authStore";
 import CodeEditor from "../../components/CodeEditor";
 import api, { runCode } from "../../utils/api";
+import { buildStarterCode } from "../../utils/codeStarter";
 
 const AttemptQuiz = () => {
     const { id } = useParams();
@@ -176,9 +177,19 @@ const AttemptQuiz = () => {
                 (e.ctrlKey && e.shiftKey && (key === "i" || key === "j" || key === "c")) ||
                 (e.ctrlKey && key === "u");
 
+            const blockedScreenshot = 
+                key === "printscreen" ||
+                (e.metaKey && e.shiftKey && (key === "s" || key === "3" || key === "4" || key === "5"));
+
             if (blockedDevtools) {
                 e.preventDefault();
                 flagViolation("devtools_open", "DevTools shortcut blocked");
+            } else if (blockedScreenshot) {
+                e.preventDefault();
+                flagViolation("screenshot_attempt", "Screenshot shortcut detected");
+                // Optional: rapidly hide the body for a moment
+                document.body.style.display = "none";
+                setTimeout(() => document.body.style.display = "", 500);
             }
         };
 
@@ -323,8 +334,8 @@ const AttemptQuiz = () => {
 
     const handleRunCode = async () => {
         const qId = quiz.questions[currentQuestionIndex].id;
-        const currentCode = answers[qId]?.submittedCode;
         const language = quiz.questions[currentQuestionIndex].language || "javascript";
+        const currentCode = answers[qId]?.submittedCode ?? starterCode;
 
         if (!currentCode) {
             alert("Please write some code first!");
@@ -369,6 +380,9 @@ const AttemptQuiz = () => {
     if (now < startTime) return <div className="text-white text-center mt-20">Quiz not started yet.</div>;
 
     const currentQ = quiz.questions[currentQuestionIndex];
+    const starterCode = currentQ?.type === 'code'
+        ? buildStarterCode(currentQ.language || "javascript", currentQ.functionName)
+        : "";
 
     return (
         <div className="flex flex-col h-screen bg-[#1e1e1e] text-gray-200 font-sans overflow-hidden">
@@ -405,7 +419,7 @@ const AttemptQuiz = () => {
                     >
                         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
                     </button>
-                    <div className="font-bold text-base md:text-xl text-blue-400 truncate max-w-[150px] md:max-w-none">{quiz.title}</div>
+                    <div className="font-bold text-base md:text-xl text-blue-400 truncate max-w-37.5 md:max-w-none">{quiz.title}</div>
                 </div>
 
                 <div className="flex items-center gap-2 bg-black/30 px-3 py-1 md:px-4 md:py-2 rounded-lg border border-gray-700">
@@ -463,6 +477,16 @@ const AttemptQuiz = () => {
                             <p className="text-base md:text-lg mb-6 leading-relaxed text-gray-100 whitespace-pre-wrap">
                                 {currentQ.title}
                             </p>
+                            {currentQ.type === 'code' && (
+                                <div className="mb-4 flex items-center gap-2 text-xs text-gray-400">
+                                    <span className="px-2 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 uppercase tracking-wide">
+                                        Language: {currentQ.language || "javascript"}
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 uppercase tracking-wide">
+                                        Function: {currentQ.functionName || "solution"}
+                                    </span>
+                                </div>
+                            )}
 
                             {currentQ.image_url && (
                                 <div className="mb-6">
@@ -505,9 +529,9 @@ const AttemptQuiz = () => {
                                 <div className="border border-gray-700 rounded-lg overflow-hidden flex flex-col">
                                     <CodeEditor
                                         language={currentQ.language || "javascript"}
-                                        code={answers[currentQ.id]?.submittedCode || ""}
+                                        code={answers[currentQ.id]?.submittedCode ?? starterCode}
                                         setCode={(val) => handleCodeChange(currentQ.id, val)}
-                                        template={`// Write your code here...`}
+                                        template={starterCode}
                                         width="100%"
                                         lockFirstLine={false}
                                     />
@@ -523,7 +547,7 @@ const AttemptQuiz = () => {
                                                 {runLoading ? (
                                                     <><span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full"></span> Running...</>
                                                 ) : (
-                                                    <>▶ Run Code</>
+                                                    <><Play className="w-4 h-4 mr-2 inline" /> Run Code</>
                                                 )}
                                             </button>
                                         </div>
@@ -532,14 +556,14 @@ const AttemptQuiz = () => {
                                             <div className="p-4 text-sm font-mono max-h-40 overflow-y-auto">
                                                 {runResult.status?.description === "Accepted" ? (
                                                     <div className="flex flex-col gap-2">
-                                                        <div className="text-green-400 font-bold mb-1">✔ Accepted</div>
+                                                        <div className="text-green-400 font-bold mb-1 flex items-center"><CheckCircle className="w-4 h-4 mr-2" /> Accepted</div>
                                                         <div><span className="text-gray-500">Input:</span> <code className="text-gray-300">{runResult.input || "-"}</code></div>
                                                         <div><span className="text-gray-500">Output:</span> <code className="text-white">{runResult.stdout?.trim() || "-"}</code></div>
                                                         <div><span className="text-gray-500">Expected:</span> <code className="text-gray-300">{runResult.expected || "-"}</code></div>
                                                     </div>
                                                 ) : (
                                                     <div className="flex flex-col gap-2">
-                                                        <div className="text-red-400 font-bold mb-1">✘ {runResult.status?.description || "Runtime Error"}</div>
+                                                        <div className="text-red-400 font-bold mb-1 flex items-center"><XCircle className="w-4 h-4 mr-2" /> {runResult.status?.description || "Runtime Error"}</div>
                                                         {runResult.stderr ? (
                                                             <pre className="text-red-300 whitespace-pre-wrap bg-red-900/10 p-2 rounded border border-red-500/20">{runResult.stderr}</pre>
                                                         ) : (
@@ -605,7 +629,7 @@ const AttemptQuiz = () => {
                 `}>
                     {/* Mobile Close Button */}
                     <div className="md:hidden absolute top-2 right-2">
-                        <button onClick={() => setIsSidebarOpen(false)} className="p-2 text-gray-400">✕</button>
+                        <button onClick={() => setIsSidebarOpen(false)} className="p-2 text-gray-400"><X className="w-5 h-5" /></button>
                     </div>
 
                     <div className="p-4 border-b border-[#333] bg-[#252526]">
