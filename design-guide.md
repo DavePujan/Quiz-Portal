@@ -160,7 +160,7 @@ This document serves as the comprehensive design guide for the Quiz Portal appli
 - **Controls**: "Run Code" (Secondary), "Submit" (Primary), "Next/Prev" (Tertiary).
 - **Timer**: Turns red when < 5 mins.
 
-### 5. **Teacher: Dashboard** ([TeacherDashboard.jsx](file:///e:/z_projects/Quiz%20Portal/leetcode-clone/frontend/src/pages/TeacherDashboard.jsx))
+### 5. **Teacher: Dashboard** ([TeacherDashboard.jsx](file:///e:/z_projects/Quiz%20Portal/leetcode-clone/frontend/src/pages/teacher/TeacherDashboard.jsx))
 - **Goal**: Overview of activity.
 - **Stats Cards**: "Active Quizzes", "Pending Evaluations", "Total Students" (Large Numbers, Trend Icons).
 - **Recent Activity**: List of recently created quizzes or submitted attempts.
@@ -190,7 +190,7 @@ This document serves as the comprehensive design guide for the Quiz Portal appli
     - **Grading Panel**: Input score, Feedback text area, "AI Analysis" toggle.
     - **Diff View**: Expected Output vs Actual Output.
 
-### 9. **Admin: Dashboard** ([AdminDashboard.jsx](file:///e:/z_projects/Quiz%20Portal/leetcode-clone/frontend/src/pages/AdminDashboard.jsx))
+### 9. **Admin: Dashboard** ([AdminDashboard.jsx](file:///e:/z_projects/Quiz%20Portal/leetcode-clone/frontend/src/pages/admin/AdminDashboard.jsx))
 - **Goal**: System health and user overview.
 - **Metrics**: System load, User growth, Total Quizzes.
 - **Alerts**: Pending Teacher Requests (High visibility).
@@ -210,7 +210,7 @@ This document serves as the comprehensive design guide for the Quiz Portal appli
 - **Layout**: Dense text listing timestamp, user, action. Monospace font for data.
 - **Filters**: By Date Range, User.
 
-### 13. **Common: Create Problem** ([CreateProblem.jsx](file:///e:/z_projects/Quiz%20Portal/leetcode-clone/frontend/src/pages/CreateProblem.jsx), [CreateQuestion.jsx](file:///e:/z_projects/Quiz%20Portal/leetcode-clone/frontend/src/pages/teacher/CreateQuestion.jsx))
+### 13. **Common: Create Problem** ([CreateQuestion.jsx](file:///e:/z_projects/Quiz%20Portal/leetcode-clone/frontend/src/pages/teacher/CreateQuestion.jsx))
 - **Goal**: Detailed problem authoring.
 - **Components**: Rich Text Editor (for description), Test Case Repeater (Input/Output pairs), Language Selector.
 
