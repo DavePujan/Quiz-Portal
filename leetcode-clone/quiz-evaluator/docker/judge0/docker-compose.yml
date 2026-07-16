@@ -1,51 +1,43 @@
+x-logging: &default-logging
+  logging:
+    driver: json-file
+    options:
+      max-size: 100M
+
 services:
-  db:
-    image: postgres:13
-    environment:
-      POSTGRES_USER: judge0
-      POSTGRES_PASSWORD: judge0
-      POSTGRES_DB: judge0
+  server:
+    image: judge0/judge0:1.13.1
     volumes:
-      - postgres-data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:6
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis-data:/data
-
-  api:
-    image: judge0/judge0:1.13.0
+      - ./judge0.conf:/judge0.conf:ro
     ports:
       - "2358:2358"
-    environment:
-      DATABASE_URL: postgres://judge0:judge0@db:5432/judge0
-      REDIS_URL: redis://redis:6379/0
-      RAILS_ENV: production
-      # Force host overrides just in case
-      JUDGE0_POSTGRES_HOST: db
-      JUDGE0_REDIS_HOST: redis
-    depends_on:
-      - db
-      - redis
+    privileged: true
+    <<: *default-logging
     restart: always
 
   worker:
-    image: judge0/judge0:1.13.0
+    image: judge0/judge0:1.13.1
     command: ["./scripts/workers"]
-    environment:
-      DATABASE_URL: postgres://judge0:judge0@db:5432/judge0
-      REDIS_URL: redis://redis:6379/0
-      RAILS_ENV: production
-      # Force host overrides just in case
-      JUDGE0_POSTGRES_HOST: db
-      JUDGE0_REDIS_HOST: redis
-    depends_on:
-      - api
-      - db
-      - redis
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    privileged: true
+    <<: *default-logging
+    restart: always
+
+  db:
+    image: postgres:13
+    env_file: judge0.conf
+    volumes:
+      - data:/var/lib/postgresql/data/
+    <<: *default-logging
+    restart: always
+
+  redis:
+    image: redis:6
+    command: ["bash", "-c", "docker-entrypoint.sh --appendonly no --requirepass \"$$REDIS_PASSWORD\""]
+    env_file: judge0.conf
+    <<: *default-logging
     restart: always
 
 volumes:
-  postgres-data:
-  redis-data:
+  data:

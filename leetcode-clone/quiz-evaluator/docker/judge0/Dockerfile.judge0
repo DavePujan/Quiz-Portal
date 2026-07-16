@@ -1,0 +1,32 @@
+FROM judge0/judge0:latest
+
+USER root
+
+# Switch to Debian archive repos because Judge0 base uses EOL buster sources
+RUN sed -i 's|deb.debian.org/debian|archive.debian.org/debian|g; s|security.debian.org/debian-security|archive.debian.org/debian-security|g' /etc/apt/sources.list \
+    && sed -i '/buster-updates/d' /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\nAcquire::AllowInsecureRepositories "true";\n' > /etc/apt/apt.conf.d/99archive \
+    && apt-get update -o Acquire::Check-Valid-Until=false \
+    && apt-get install -y --no-install-recommends openjdk-11-jdk-headless nodejs ccache \
+    && rm -rf /var/lib/apt/lists/*
+
+# Persistent compiler cache for C/C++ workers
+ENV PATH="/usr/lib/ccache:${PATH}"
+ENV CCACHE_DIR=/ccache
+RUN mkdir -p /ccache && chmod 777 /ccache
+
+# Java wrapper at Judge0-expected path with conservative memory flags
+RUN if [ -x /usr/local/openjdk13/bin/java ]; then mv /usr/local/openjdk13/bin/java /usr/local/openjdk13/bin/java.orig; fi \
+    && printf '#!/bin/bash\nexec /usr/bin/java -Xms16m -Xmx256m -XX:+UseSerialGC -XX:MaxRAMPercentage=50 -XX:+UseContainerSupport "$@"\n' > /usr/local/openjdk13/bin/java \
+    && chmod +x /usr/local/openjdk13/bin/java
+
+RUN if [ -x /usr/local/openjdk13/bin/javac ]; then mv /usr/local/openjdk13/bin/javac /usr/local/openjdk13/bin/javac.orig; fi \
+    && printf '#!/bin/bash\nexec /usr/bin/javac "$@"\n' > /usr/local/openjdk13/bin/javac \
+    && chmod +x /usr/local/openjdk13/bin/javac
+
+# Node wrapper at Judge0-expected path with capped memory
+RUN if [ -x /usr/local/node-12.14.0/bin/node ]; then mv /usr/local/node-12.14.0/bin/node /usr/local/node-12.14.0/bin/node.orig; fi \
+    && printf '#!/bin/bash\nexec /usr/bin/node --max-old-space-size=256 "$@"\n' > /usr/local/node-12.14.0/bin/node \
+    && chmod +x /usr/local/node-12.14.0/bin/node
+
+USER judge0
