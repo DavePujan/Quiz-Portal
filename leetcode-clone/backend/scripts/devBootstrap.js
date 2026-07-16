@@ -148,6 +148,29 @@ function isPortAlreadyPublished(port) {
     .some((line) => line.includes(marker));
 }
 
+function getContainersPublishingPort(port) {
+  const result = spawnSync("docker", ["ps", "--format", "{{.Names}}||{{.Ports}}"], {
+    cwd,
+    stdio: "pipe",
+    encoding: "utf8",
+    shell: false,
+    windowsHide: true
+  });
+
+  if (result.error || result.status !== 0) {
+    return [];
+  }
+
+  const marker = `:${port}->`;
+  return (result.stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => line.includes(marker))
+    .map((line) => line.split("||")[0])
+    .filter(Boolean);
+}
+
 function ensureModelArtifacts() {
   const missing = modelFiles.filter((filePath) => !existsSync(filePath));
   if (missing.length > 0) {
@@ -184,32 +207,31 @@ function startInfra() {
     if (!started) {
       log("Could not start one or more selected core containers. Continuing backend startup.");
     }
-  } else {
-    startComposeStack(composeFile, ["redis", "prometheus", "grafana"], "core infra");
   }
 
-  const judgeOfficialNames = [
-    "judge0-official-db-1",
-    "judge0-official-redis-1",
-    "judge0-official-server-1",
-    "judge0-official-worker-1"
-  ];
-  const existingJudgeOfficial = judgeOfficialNames.filter((name) => existingNames.includes(name));
+  // Idempotent: ensure all core services exist and are up even if only a subset was pre-existing.
+  startComposeStack(composeFile, ["redis", "prometheus", "grafana"], "core infra");
 
-  if (existingJudgeOfficial.length > 0) {
-    log("Detected existing judge0-official stack. Starting it directly...");
-    const started = startNamedContainers(existingJudgeOfficial);
-    if (!started) {
-      log("Could not start one or more judge0-official containers. Continuing backend startup.");
-    }
+  if (!existsSync(judgeComposeFile)) {
+    log(`Judge0 compose file missing at ${judgeComposeFile}. Skipping Judge0 bootstrap.`);
     return;
   }
 
   if (isPortAlreadyPublished(2358)) {
-    log("Port 2358 is already in use by an existing container. Skipping Judge0 bootstrap.");
-  } else {
-    log(`No judge0-official containers found. Skipping automatic Judge0 creation. If needed, use ${judgeComposeFile} manually.`);
+    const publishers = getContainersPublishingPort(2358);
+    const judgePublishers = publishers.filter((name) => /judge0|api/i.test(name));
+
+    if (judgePublishers.length > 0) {
+      log(`Judge0 appears to be running on port 2358 (${judgePublishers.join(", ")}).`);
+    } else {
+      log(`Port 2358 is occupied by non-Judge0 container(s): ${publishers.join(", ")}. Skipping Judge0 bootstrap.`);
+    }
+    return;
   }
+
+  log(`Starting Judge0 stack from ${judgeComposeFile}...`);
+  // Idempotent: docker compose up -d creates/starts only what is needed.
+  startComposeStack(judgeComposeFile, [], "judge0-official");
 }
 
 function bootstrap() {

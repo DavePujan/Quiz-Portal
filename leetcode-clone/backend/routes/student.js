@@ -2,6 +2,7 @@ const router = require("express").Router();
 const { createClient } = require("@supabase/supabase-js");
 const { auth } = require("../middleware/auth");
 const { analyzeCode } = require("../utils/ai");
+const { buildWrappedCode } = require("../utils/codeExecution");
 const pool = require("../db");
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -41,6 +42,13 @@ async function ensureAttemptShuffleColumns() {
     await pool.query(`
         ALTER TABLE quiz_attempts
         ADD COLUMN IF NOT EXISTS option_order JSONB DEFAULT '{}'::jsonb;
+    `);
+}
+
+async function ensureQuestionFunctionNameColumn() {
+    await pool.query(`
+        ALTER TABLE questions
+        ADD COLUMN IF NOT EXISTS function_name TEXT;
     `);
 }
 
@@ -349,6 +357,7 @@ router.get("/quiz/:id", auth, async (req, res) => {
         const { id } = req.params;
 
         await ensureAttemptShuffleColumns();
+        await ensureQuestionFunctionNameColumn();
 
         const { data: profile } = await supabase
             .from("profiles")
@@ -399,7 +408,7 @@ router.get("/quiz/:id", auth, async (req, res) => {
                 question_id,
                 weightage,
                 question:questions (
-                    id, title, type, language, input_format, output_format, image_url,
+                    id, title, type, language, function_name, input_format, output_format, image_url,
                     mcq_options (id, option_text)
                 )
             `)
@@ -787,17 +796,27 @@ router.post("/quiz/:id/run", auth, async (req, res) => {
         const { id } = req.params; // quiz id
         const { questionId, code, language } = req.body;
 
+        await ensureQuestionFunctionNameColumn();
+
         // 1. Fetch Question & First Test Case
-        const { data: testCases, error } = await supabase
-            .from("testcases")
-            .select("input, expected_output")
-            .eq("question_id", questionId)
-            // .limit(1) // Just get all and pick first, or limit. 
-            // Better to order by id or something stable? 
-            // Let's just pick the first one returned.
-            .order("id", { ascending: true })
-            .limit(1)
-            .single();
+        const [{ data: question, error: questionError }, { data: testCases, error }] = await Promise.all([
+            supabase
+                .from("questions")
+                .select("id, title, language, function_name")
+                .eq("id", questionId)
+                .single(),
+            supabase
+                .from("testcases")
+                .select("input, expected_output")
+                .eq("question_id", questionId)
+                .order("id", { ascending: true })
+                .limit(1)
+                .single()
+        ]);
+
+        if (questionError) {
+            return res.status(404).json({ error: "Question not found" });
+        }
 
         if (error || !testCases) {
             // Fallback if no test cases?
@@ -811,29 +830,12 @@ router.post("/quiz/:id/run", auth, async (req, res) => {
         // 2. Prepare execution
         const judge0 = require("../utils/judge0");
 
-        // Wrap code (reusing logic from teacher.js if possible, but duplicating for safety now to avoid wide Refactor)
-        // Wrapper logic is crucial for JS/Python/C++ to read inputs.
-        // User's previous teacher.js had a 'wrapCode' helper. I should probably use a shared utility, 
-        // but for now I'll inline a simple version or try to extract it. 
-        // Let's inline the basic wrapper for now to ensure it works.
-        const wrapCode = (code, lang) => {
-            if (lang === "javascript") {
-                return `${code}\n\n// Driver Code\nconst fs = require('fs');\nconst input = fs.readFileSync(0, 'utf-8').trim().split(/\\s+/).map(Number);\nconsole.log(solution(...input));`;
-            } else if (lang === "python") {
-                return `${code}\n\n# Driver Code\nimport sys\ninput_data = sys.stdin.read().strip().split()\nargs = [int(x) for x in input_data]\nprint(solution(*args))`;
-            } else if (lang === "cpp") {
-                return `#include <iostream>\n#include <vector>\n#include <sstream>\nusing namespace std;\n\n${code}\n\nint main() {\n    // Simplified C++ driver for demo "a b"\n    // Assuming solution(int, int)\n    int a, b;\n    if (cin >> a >> b) cout << solution(a, b) << endl;\n    return 0;\n}`;
-            } else if (lang === "java") {
-                return `import java.util.*;\n\npublic class Main {\n${code}\n\npublic static void main(String[] args) {\n    Scanner sc = new Scanner(System.in);\n    int a = sc.nextInt();\n    int b = sc.nextInt();\n    System.out.print(solution(a, b));\n}\n}`;
-            } else if (lang === "php") {
-                return `<?php\n${code}\n\n$input = trim(stream_get_contents(STDIN));\n$parts = preg_split('/\\\\s+/', $input);\n$args = array_map('intval', $parts);\necho solution(...$args);\n?>`;
-            }
-            return code;
-        };
-
-        const finalCode = wrapCode(code, language);
-        // Map language name to ID via shared resolver
+        const finalCode = buildWrappedCode(code, language, question.function_name, testCases.input);
         const langId = judge0.resolveLanguageId(language);
+
+        if (!langId) {
+            return res.status(400).json({ error: "Language not supported by current Judge0 configuration" });
+        }
 
         // 3. Run on Judge0
         const result = await judge0.run({
@@ -1019,6 +1021,8 @@ router.get("/practice/quiz/:id", auth, async (req, res) => {
     try {
         const { id } = req.params;
 
+        await ensureQuestionFunctionNameColumn();
+
         const quizResult = await pool.query(
             `
                 SELECT id, title, COALESCE(subject, 'General') AS subject, COALESCE(total_marks, 0) AS total_marks
@@ -1040,6 +1044,7 @@ router.get("/practice/quiz/:id", auth, async (req, res) => {
                     q.title,
                     LOWER(COALESCE(q.type, 'mcq')) AS type,
                     q.language,
+                    q.function_name AS "functionName",
                     q.input_format,
                     q.output_format,
                     COALESCE(t.name, 'General') AS topic,
@@ -1059,7 +1064,7 @@ router.get("/practice/quiz/:id", auth, async (req, res) => {
                 LEFT JOIN topics t ON t.id = q.topic_id
                 LEFT JOIN mcq_options mo ON mo.question_id = q.id
                 WHERE qqm.quiz_id = $1
-                GROUP BY q.id, q.title, q.type, q.language, q.input_format, q.output_format, t.name, qqm.weightage, q.weightage
+                GROUP BY q.id, q.title, q.type, q.language, q.function_name, q.input_format, q.output_format, t.name, qqm.weightage, q.weightage
                 ORDER BY q.created_at ASC;
             `,
             [id]

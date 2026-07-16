@@ -5,6 +5,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 const { auth, authorize } = require("../middleware/auth");
 const { aiLimiter } = require("../middleware/rateLimiter");
 const pool = require("../db");
+const { buildWrappedCode } = require("../utils/codeExecution");
 
 // Mock database for problems
 // In reality, this should be in models/questions.js or independent db
@@ -18,6 +19,13 @@ async function ensureProfileEnrollmentColumn() {
     await pool.query(`
         ALTER TABLE profiles
         ADD COLUMN IF NOT EXISTS enrollment_no TEXT;
+    `);
+}
+
+async function ensureQuestionFunctionNameColumn() {
+    await pool.query(`
+        ALTER TABLE questions
+        ADD COLUMN IF NOT EXISTS function_name TEXT;
     `);
 }
 
@@ -325,7 +333,33 @@ router.post("/problem", auth, authorize('teacher'), async (req, res) => {
     }
 });
 
-// AI Settings Routes
+// ─── Ensure openrouter_api_key column exists ─────────────────────────
+async function ensureOpenRouterKeyColumn() {
+    await pool.query(`
+        ALTER TABLE profiles
+        ADD COLUMN IF NOT EXISTS openrouter_api_key TEXT;
+    `);
+}
+
+// ─── Ensure cerebras_api_key column exists ─────────────────────────
+async function ensureCerebrasKeyColumn() {
+    await pool.query(`
+        ALTER TABLE profiles
+        ADD COLUMN IF NOT EXISTS cerebras_api_key TEXT;
+    `);
+}
+
+// ─── Ensure mistral_api_key column exists ─────────────────────────
+async function ensureMistralKeyColumn() {
+    await pool.query(`
+        ALTER TABLE profiles
+        ADD COLUMN IF NOT EXISTS mistral_api_key TEXT;
+    `);
+}
+
+// ─── AI Settings Routes (Generalized) ────────────────────────────────
+
+// Legacy gemini-key endpoints (backward compatibility)
 router.post("/settings/gemini-key", auth, authorize('teacher'), async (req, res) => {
     try {
         const { apiKey } = req.body;
@@ -334,7 +368,7 @@ router.post("/settings/gemini-key", auth, authorize('teacher'), async (req, res)
         const { error } = await supabase
             .from("profiles")
             .update({ gemini_api_key: apiKey })
-            .eq("email", req.user.email); // Assuming email is unique/stable for user
+            .eq("email", req.user.email);
 
         if (error) throw error;
         res.json({ message: "API Key saved successfully" });
@@ -353,8 +387,6 @@ router.get("/settings/gemini-key", auth, authorize('teacher'), async (req, res) 
             .single();
 
         if (error) throw error;
-        // Don't return the full key for security? Or maybe returning masking is better.
-        // For now, just boolean status is enough for the UI to know if it needs to ask.
         res.json({ hasKey: !!data.gemini_api_key });
     } catch (err) {
         console.error("Get Key Status Error:", err);
@@ -362,24 +394,172 @@ router.get("/settings/gemini-key", auth, authorize('teacher'), async (req, res) 
     }
 });
 
-// AI Quiz Generation
-router.post("/ai/generate", auth, authorize('teacher'), aiLimiter, async (req, res) => {
+// Get all AI provider statuses for the logged-in teacher
+router.get("/settings/ai-providers", auth, authorize('teacher'), async (req, res) => {
     try {
-        const { prompt } = req.body;
-        if (!prompt) return res.status(400).json({ error: "Prompt is required" });
+        await ensureOpenRouterKeyColumn();
+        await ensureCerebrasKeyColumn();
+        await ensureMistralKeyColumn();
 
-        // Fetch User's API Key
-        const { data: profile, error } = await supabase
+        const { data, error } = await supabase
             .from("profiles")
-            .select("gemini_api_key")
+            .select("gemini_api_key, openrouter_api_key, cerebras_api_key, mistral_api_key")
             .eq("email", req.user.email)
             .single();
 
-        if (error || !profile?.gemini_api_key) {
-            return res.status(400).json({ error: "Gemini API Key not found. Please set it in settings." });
+        if (error) throw error;
+
+        // Mask keys for display (show last 4 chars)
+        const maskKey = (key) => {
+            if (!key) return null;
+            return key.length > 8 ? "****" + key.slice(-4) : "****";
+        };
+
+        res.json({
+            providers: [
+                {
+                    id: "gemini",
+                    name: "Gemini",
+                    configured: !!data.gemini_api_key,
+                    maskedKey: maskKey(data.gemini_api_key),
+                    description: "Google's Gemini AI. Fast and reliable for quiz generation.",
+                    docsUrl: "https://aistudio.google.com/apikey"
+                },
+                {
+                    id: "openrouter",
+                    name: "OpenRouter",
+                    configured: !!data.openrouter_api_key,
+                    maskedKey: maskKey(data.openrouter_api_key),
+                    description: "Access 100+ models including free ones like Google Gemma 4.",
+                    docsUrl: "https://openrouter.ai/settings/keys"
+                },
+                {
+                    id: "cerebras",
+                    name: "Cerebras",
+                    configured: !!data.cerebras_api_key,
+                    maskedKey: maskKey(data.cerebras_api_key),
+                    description: "High-performance inference for enterprise workloads.",
+                    docsUrl: "https://cloud.cerebras.ai/"
+                },
+                {
+                    id: "mistral",
+                    name: "Mistral",
+                    configured: !!data.mistral_api_key,
+                    maskedKey: maskKey(data.mistral_api_key),
+                    description: "Frontier open models from Mistral AI.",
+                    docsUrl: "https://console.mistral.ai/api-keys/"
+                }
+            ]
+        });
+    } catch (err) {
+        console.error("Get AI Providers Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Save an AI provider key
+router.post("/settings/ai-key", auth, authorize('teacher'), async (req, res) => {
+    try {
+        await ensureOpenRouterKeyColumn();
+        await ensureCerebrasKeyColumn();
+        await ensureMistralKeyColumn();
+
+        const { provider, apiKey } = req.body;
+        if (!provider || !apiKey) {
+            return res.status(400).json({ error: "Provider and API Key are required." });
         }
 
-        const questions = await ai.generateQuiz({ prompt, apiKey: profile.gemini_api_key });
+        if (!ai.ALLOWED_PROVIDERS.includes(provider)) {
+            return res.status(400).json({ error: `Invalid provider: ${provider}. Allowed: ${ai.ALLOWED_PROVIDERS.join(", ")}` });
+        }
+
+        // Basic key format validation
+        if (provider === "openrouter" && !apiKey.startsWith("sk-or-")) {
+            return res.status(400).json({ error: "Invalid OpenRouter API key. Keys should start with 'sk-or-'." });
+        }
+
+        const column = ai.PROVIDER_KEY_COLUMNS[provider];
+        const { error } = await supabase
+            .from("profiles")
+            .update({ [column]: apiKey })
+            .eq("email", req.user.email);
+
+        if (error) throw error;
+        res.json({ message: `${provider} API key saved successfully.` });
+    } catch (err) {
+        console.error("Save AI Key Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Remove an AI provider key
+router.delete("/settings/ai-key", auth, authorize('teacher'), async (req, res) => {
+    try {
+        await ensureOpenRouterKeyColumn();
+        await ensureCerebrasKeyColumn();
+        await ensureMistralKeyColumn();
+
+        const { provider } = req.body;
+        if (!provider) {
+            return res.status(400).json({ error: "Provider is required." });
+        }
+
+        if (!ai.ALLOWED_PROVIDERS.includes(provider)) {
+            return res.status(400).json({ error: `Invalid provider: ${provider}.` });
+        }
+
+        const column = ai.PROVIDER_KEY_COLUMNS[provider];
+        const { error } = await supabase
+            .from("profiles")
+            .update({ [column]: null })
+            .eq("email", req.user.email);
+
+        if (error) throw error;
+        res.json({ message: `${provider} API key removed.` });
+    } catch (err) {
+        console.error("Remove AI Key Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── AI Quiz Generation (Multi-Provider) ─────────────────────────────
+router.post("/ai/generate", auth, authorize('teacher'), aiLimiter, async (req, res) => {
+    try {
+        const { prompt, provider = "gemini", model } = req.body;
+        console.log("AI Generate: Prompt received for provider", provider, "model", model);
+        if (!prompt) return res.status(400).json({ error: "Prompt is required" });
+
+        if (!ai.ALLOWED_PROVIDERS.includes(provider)) {
+            return res.status(400).json({ error: `Invalid provider: ${provider}. Allowed: ${ai.ALLOWED_PROVIDERS.join(", ")}` });
+        }
+
+        console.log("AI Generate: Ensuring OpenRouter Key column...");
+        await ensureOpenRouterKeyColumn();
+        await ensureCerebrasKeyColumn();
+        await ensureMistralKeyColumn();
+
+        console.log("AI Generate: Fetching key for provider...");
+        // Fetch the teacher's key for the selected provider
+        const keyColumn = ai.PROVIDER_KEY_COLUMNS[provider];
+        const { data: profile, error } = await supabase
+            .from("profiles")
+            .select(keyColumn)
+            .eq("email", req.user.email)
+            .single();
+
+        if (error) throw error;
+
+        const apiKey = profile?.[keyColumn];
+        if (!apiKey) {
+            console.log("AI Generate: No API key found for", provider);
+            return res.status(400).json({
+                error: `${provider} API key not found. Please configure it in Settings.`
+            });
+        }
+
+        console.log("AI Generate: Calling ai.generateQuiz... key length:", apiKey.length, "starts with:", apiKey.substring(0, 8));
+        const questions = await ai.generateQuiz({ prompt, apiKey, provider, model });
+        console.log("AI Generate: Success!");
         res.json({ questions });
     } catch (err) {
         console.error("AI Generate Route Error:", err);
@@ -390,6 +570,8 @@ router.post("/ai/generate", auth, authorize('teacher'), aiLimiter, async (req, r
 // Unified Quiz Creation
 router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res) => {
     try {
+        await ensureQuestionFunctionNameColumn();
+
         const { title, subject, duration, totalMarks, description, questions, department, semester } = req.body;
 
         // Fetch valid UUID from Supabase profiles
@@ -437,6 +619,7 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
                     type: q.type, // 'mcq' or 'code'
                     weightage: q.marks,
                     language: q.language,
+                    function_name: q.functionName || null,
                     input_format: q.inputFormat,
                     output_format: q.outputFormat,
                     created_by: userId,
@@ -490,18 +673,31 @@ const ai = require("../utils/ai");
 router.post("/evaluate/:id", auth, authorize('teacher'), aiLimiter, async (req, res) => {
     try {
         const { id } = req.params;
+        const { provider = "gemini", model } = req.body;
+        await ensureQuestionFunctionNameColumn();
 
-        // 0. Fetch Teacher's API Key
+        console.log("AI Evaluate: Fetching key for provider", provider);
+        // Ensure all key columns exist
+        await ensureOpenRouterKeyColumn();
+        await ensureCerebrasKeyColumn();
+        await ensureMistralKeyColumn();
+
+        if (!ai.ALLOWED_PROVIDERS.includes(provider)) {
+            return res.status(400).json({ error: `Invalid provider: ${provider}` });
+        }
+
+        // Fetch Teacher's API Key for the selected provider
+        const keyColumn = ai.PROVIDER_KEY_COLUMNS[provider];
         const { data: profile } = await supabase
             .from("profiles")
-            .select("gemini_api_key")
+            .select(keyColumn)
             .eq("email", req.user.email)
             .single();
 
-        if (!profile?.gemini_api_key) {
-            return res.status(400).json({ error: "Gemini API Key is required for auto-evaluation. Please set it in Settings." });
+        const apiKey = profile?.[keyColumn];
+        if (!apiKey) {
+            return res.status(400).json({ error: `${provider} API Key is required for auto-evaluation. Please set it in Settings.` });
         }
-        const apiKey = profile.gemini_api_key;
 
         // 1. Fetch Attempt & Answers with Question Details (including TestCases)
         // Need to join questions -> testcases? Or fetch separately.
@@ -523,6 +719,7 @@ router.post("/evaluate/:id", auth, authorize('teacher'), aiLimiter, async (req, 
                     type,
                     weightage,
                     language,
+                    function_name,
                     input_format,
                     output_format,
                     testcases(input, expected_output)
@@ -540,7 +737,7 @@ router.post("/evaluate/:id", auth, authorize('teacher'), aiLimiter, async (req, 
             // Only evaluate Code questions
             if (ans.question?.type === "code" && ans.submitted_code) {
                 const { submitted_code, question } = ans;
-                const language = question.language || "javascript";
+                const language = question.language || "python";
                 const testCases = question.testcases || [];
 
 
@@ -549,43 +746,14 @@ router.post("/evaluate/:id", auth, authorize('teacher'), aiLimiter, async (req, 
                 let judge0Results = [];
 
                 if (testCases.length > 0) {
-                    // Helper to wrap code for execution
-                    const wrapCode = (code, lang) => {
-                        let funcName = "solution"; // Default
+                    const languageId = judge0.resolveLanguageId(language);
+                    if (!languageId) {
+                        throw new Error(`Language not supported by current Judge0 configuration: ${language}`);
+                    }
 
-                        if (lang === "javascript") {
-                            const match = code.match(/function\s+(\w+)/) || code.match(/const\s+(\w+)\s*=\s*/);
-                            if (match) funcName = match[1];
-                            return `${code}\n\n// Driver Code\nconst fs = require('fs');\nconst input = fs.readFileSync(0, 'utf-8').trim().split(/\\s+/).map(Number);\nif (typeof ${funcName} !== 'undefined') {\n    console.log(${funcName}(...input));\n} else {\n    console.log("Error: Function not found");\n}`;
-                        } else if (lang === "python") {
-                            const match = code.match(/def\s+(\w+)/);
-                            if (match) funcName = match[1];
-                            return `${code}\n\n# Driver Code\nimport sys\ninput_data = sys.stdin.read().strip().split()\nargs = [int(x) for x in input_data]\nif '${funcName}' in locals():\n    print(${funcName}(*args))\nelse:\n    print("Error: Function not found")`;
-                        } else if (lang === "cpp") {
-                            // C++ parsing is complex, assuming standard name or user defined
-                            // Try to find a function returning int/void that isn't main
-                            // For now, let's just create a loose match or stick to "solution" if complex
-                            // But usually C++ requires exact signature matching.
-                            // Let's rely on "solution" or try to find it.
-                            // Simple heuristic: Function name before '('
-                            const match = code.match(/\w+\s+(\w+)\s*\(/);
-                            // This is too weak for C++. 
-                            // Better allow user to define main, or enforce "solution".
-                            // For this fix, let's keep "solution" for C++ unless we find "sum" explicitly
-                            if (code.includes("int sum")) funcName = "sum";
-                            return `#include <iostream>\n#include <vector>\n#include <sstream>\nusing namespace std;\n\n${code}\n\nint main() {\n    // Driver assuming int inputs\n    int a, b;\n    while (cin >> a >> b) {\n        cout << ${funcName}(a, b) << endl;\n    }\n    return 0;\n}`;
-                        } else if (lang === "java") {
-                            return `import java.util.*;\n\npublic class Main {\n${code}\n\npublic static void main(String[] args) {\n    Scanner sc = new Scanner(System.in);\n    int a = sc.nextInt();\n    int b = sc.nextInt();\n    System.out.print(${funcName}(a, b));\n}\n}`;
-                        } else if (lang === "php") {
-                            return `<?php\n${code}\n\n$input = trim(stream_get_contents(STDIN));\n$parts = preg_split('/\\\\s+/', $input);\n$args = array_map('intval', $parts);\nif (function_exists('${funcName}')) {\n    echo call_user_func_array('${funcName}', $args);\n} else {\n    fwrite(STDERR, 'Function not found');\n}\n?>`;
-                        }
-                        return code;
-                    };
-
-                    // Prepare batch submission
                     const submissions = testCases.map(tc => ({
-                        source_code: wrapCode(submitted_code, language),
-                        language_id: judge0.resolveLanguageId(language),
+                        source_code: buildWrappedCode(submitted_code, language, question.function_name, tc.input),
+                        language_id: languageId,
                         stdin: tc.input,
                         expected_output: tc.expected_output
                     }));
@@ -611,7 +779,9 @@ router.post("/evaluate/:id", auth, authorize('teacher'), aiLimiter, async (req, 
                     input_format: question.input_format,
                     output_format: question.output_format,
                     max_marks: maxMarks,
-                    apiKey: apiKey
+                    apiKey: apiKey,
+                    provider: provider,
+                    model: model
                 });
 
                 const logicScore = aiResult.logic_score || 0; // 0 to 1

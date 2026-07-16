@@ -33,7 +33,7 @@ class HybridStore {
 
     getRedisStore() {
         if (!redisClient.isAvailable) {
-            this.redisStore = null; // 🔥 reset when Redis is down
+            this.redisStore = null; //  reset when Redis is down
             return null;
         }
 
@@ -64,17 +64,17 @@ class HybridStore {
                     const store = this.getRedisStore();
                     if (store) return await store.increment(key);
                 } catch (e) {
-                    console.warn("⚠️ Redis failed, triggering 5 sec circuit breaker. Falling back to memory:", e.message);
+                    console.warn("Redis failed, triggering 5 sec circuit breaker. Falling back to memory:", e.message);
                     this.redisDownUntil = Date.now() + 5000;
-                    fallbackCounter.inc(); // 🔥 Track crash-path fallback
+                    fallbackCounter.inc(); //  Track crash-path fallback
                 }
             }
         } else {
             if (!this.warned) {
-                console.warn("⚠️ Using Memory Rate Limiter");
+                console.warn("Using Memory Rate Limiter");
                 this.warned = true;
             }
-            fallbackCounter.inc(); // 🔥 Track every unavailable-path fallback
+            fallbackCounter.inc(); //  Track every unavailable-path fallback
         }
 
         // Fallback -> Memory

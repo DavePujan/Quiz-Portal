@@ -3,6 +3,7 @@ const { io } = require("socket.io-client");
 const { connection } = require("../queues/submission.queue");
 const { runBatch, normalizeLanguage, resolveLanguageId } = require("../utils/judge0");
 const boilerplates = require("../utils/boilerplates");
+const { buildWrappedCode } = require("../utils/codeExecution");
 const questions = require("../models/Question");
 const leaderboard = require("../models/Leaderboard");
 const redisClient = require("../config/redis");
@@ -21,17 +22,17 @@ const workerSocket = io(
 let isConnected = false;
 
 workerSocket.on("connect", () => {
-    console.log("🔗 Worker connected to socket server");
+    console.log("Worker connected to socket server");
     isConnected = true;
 });
 
 workerSocket.on("disconnect", () => {
-    console.log("❌ Worker socket disconnected");
+    console.log("Worker socket disconnected");
     isConnected = false;
 });
 
 workerSocket.on("connect_error", (err) => {
-    console.error("⚠️ Worker socket connection error:", err.message);
+    console.error("Worker socket connection error:", err.message);
     isConnected = false;
 });
 
@@ -105,7 +106,7 @@ const worker = new Worker(
         const q = questions[questionId];
         const languageId = resolveLanguageId(normalizedLanguage, q?.langMap || {});
 
-        console.log(`🚀 Processing job ${job.id}: ${normalizedLanguage} submission for Q:${questionId}`);
+        console.log(`Processing job ${job.id}: ${normalizedLanguage} submission for Q:${questionId}`);
         console.log("Function Name:", q?.functionName);
         console.log("User Code:", code);
 
@@ -117,11 +118,11 @@ const worker = new Worker(
         // --- Run Public Test Cases ---
         emitJobStatus(job.id, { executionId, status: "Executing public test cases..." });
         const publicSubmissions = q.testCases.public.map(tc => ({
-            source_code: boilerplates[normalizedLanguage](code, q.functionName, tc.input),
+            source_code: buildWrappedCode(code, normalizedLanguage, q.functionName, tc.input, q.signature),
             language_id: languageId,
             expected_output: tc.output,
             cpu_time_limit: 2,
-            memory_limit: 128000,
+            memory_limit: 4096000,
             max_processes_and_or_threads: 30
         }));
 
@@ -174,11 +175,11 @@ const worker = new Worker(
         // --- Run Hidden Test Cases ---
         emitJobStatus(job.id, { executionId, status: "Executing hidden test cases..." });
         const hiddenSubmissions = q.testCases.hidden.map(tc => ({
-            source_code: boilerplates[normalizedLanguage](code, q.functionName, tc.input),
+            source_code: buildWrappedCode(code, normalizedLanguage, q.functionName, tc.input, q.signature),
             language_id: languageId,
             expected_output: tc.output,
             cpu_time_limit: 2,
-            memory_limit: 128000,
+            memory_limit: 4096000,
             max_processes_and_or_threads: 30
         }));
 
@@ -238,7 +239,7 @@ const worker = new Worker(
         };
         emitJobStatus(job.id, {
             executionId,
-            status: "Accepted ✅",
+            status: "Accepted ",
             result: acceptedResult
         });
         return acceptedResult;
@@ -250,11 +251,11 @@ const worker = new Worker(
 );
 
 worker.on("completed", (job, result) => {
-    console.log(`✅ Job ${job.id} completed: ${result?.verdict}`);
+    console.log(`Job ${job.id} completed: ${result?.verdict}`);
 });
 
 worker.on("failed", (job, err) => {
-    console.error(`❌ Job ${job.id} failed:`, err.message);
+    console.error(`Job ${job.id} failed:`, err.message);
     emitJobStatus(job?.id, {
         executionId: job?.data?.executionId,
         status: err.message || "Failed",
@@ -272,6 +273,6 @@ process.on("SIGTERM", () => {
     process.exit(0);
 });
 
-console.log("🔧 Submission Worker started and listening for jobs...");
+console.log("Submission Worker started and listening for jobs...");
 
 module.exports = worker;

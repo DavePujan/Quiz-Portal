@@ -52,7 +52,7 @@ router.post("/login", loginLimiter, async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ error: "Invalid credentials" });
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "15m" });
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
     const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "7d" });
 
     const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: process.env.NODE_ENV === "production" ? "none" : "lax" };
@@ -144,7 +144,7 @@ router.post("/refresh", async (req, res) => {
         if (isBlacklisted) return res.status(401).json({ error: "Refresh token blacklisted" });
 
         const u = jwt.verify(token, REFRESH_SECRET);
-        const newAccess = jwt.sign({ id: u.id, email: u.email, role: u.role }, process.env.JWT_SECRET, { expiresIn: "15m" });
+        const newAccess = jwt.sign({ id: u.id, email: u.email, role: u.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
         res.cookie("accessToken", newAccess, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: process.env.NODE_ENV === "production" ? "none" : "lax" });
         res.json({ message: "Refreshed successfully" });
     } catch (err) {
@@ -184,7 +184,7 @@ router.get("/google/callback", (req, res, next) => {
         }
 
         // Success
-        const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "15m" });
+        const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
         const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "7d" });
 
         res.cookie("refreshToken", refreshToken, { httpOnly: true, secure: false, sameSite: "strict" });
@@ -201,7 +201,7 @@ router.get("/github/callback", (req, res, next) => {
             return res.redirect(`http://localhost:5173/login?error=not_found&email=${email}&provider=github`);
         }
 
-        const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "15m" });
+        const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
         const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "7d" });
 
         res.cookie("refreshToken", refreshToken, { httpOnly: true, secure: false, sameSite: "strict" });

@@ -30,7 +30,7 @@ const io = new Server(server, {
 app.set("io", io);
 
 io.on("connection", (socket) => {
-    console.log("🔌 Client connected:", socket.id);
+    console.log("Client connected:", socket.id);
 
     socket.on("join-job", (jobId) => {
         if (!jobId) return;
@@ -47,7 +47,7 @@ io.on("connection", (socket) => {
     });
 
     socket.on("disconnect", () => {
-        console.log("❌ Client disconnected:", socket.id);
+        console.log("Client disconnected:", socket.id);
     });
 });
 
@@ -61,7 +61,8 @@ app.use(cookieParser());
 
 app.use("/auth", authRoutes);
 
-// Metrics Collection Middleware
+// Metrics Collection Middleware - Prometheus
+// to track method, route, and status code
 const { client, httpRequests } = require("./metrics");
 app.use((req, res, next) => {
     res.on("finish", () => {
@@ -74,6 +75,7 @@ app.use((req, res, next) => {
     next();
 });
 
+// /metrics endpoint - Used by Prometheus to scrape metrics
 app.get("/metrics", async (req, res) => {
     res.set("Content-Type", client.register.contentType);
     res.end(await client.register.metrics());

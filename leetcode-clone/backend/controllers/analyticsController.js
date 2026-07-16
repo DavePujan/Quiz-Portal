@@ -1284,71 +1284,32 @@ const getStudentRecommendationsV2 = async (req, res) => {
       const targetDifficulty = difficultyMap[weak.topicId] || "easy";
 
       const queryWithDifficulty = `
-        SELECT DISTINCT
-          qu.id,
-          qu.title,
-          COALESCE(qu.subject, 'General') AS subject,
-          ${hasDifficultyColumn ? "COALESCE(qu.difficulty, 'medium')" : "$2::text"} AS difficulty
-        FROM quizzes qu
-        JOIN quiz_questions_map qqm ON qqm.quiz_id = qu.id
-        JOIN questions q ON q.id = qqm.question_id
-        WHERE q.topic_id = $1
-          AND qu.status IN ('active', 'completed')
-          ${hasDifficultyColumn ? "AND COALESCE(qu.difficulty, 'medium') = $2" : ""}
-          AND (
-            NOT EXISTS (
-              SELECT 1
-              FROM quiz_attempts a
-              WHERE a.quiz_id = qu.id
-                AND a.user_id = $3
-                AND a.status IN ('submitted', 'evaluated')
-            )
-            OR EXISTS (
-              SELECT 1
-              FROM quiz_attempts a
-              WHERE a.quiz_id = qu.id
-                AND a.user_id = $3
-                AND a.status IN ('submitted', 'evaluated')
-                AND (
-                  CASE
-                    WHEN COALESCE(a.total_marks, qu.total_marks, 0) > 0
-                    THEN a.score * 100.0 / COALESCE(a.total_marks, qu.total_marks, 1)
-                    ELSE 0
-                  END
-                ) < 70
-            )
-          )
-        ORDER BY RANDOM()
-        LIMIT 3;
-      `;
-
-      let quizRes = await pool.query(queryWithDifficulty, [weak.topicId, targetDifficulty, resolvedUserId]);
-
-      if (quizRes.rows.length === 0 && hasDifficultyColumn) {
-        const fallbackQuery = `
+        SELECT *
+        FROM (
           SELECT DISTINCT
             qu.id,
             qu.title,
             COALESCE(qu.subject, 'General') AS subject,
-            COALESCE(qu.difficulty, 'medium') AS difficulty
+            ${hasDifficultyColumn ? "COALESCE(qu.difficulty, 'medium')" : "$2::text"} AS difficulty
           FROM quizzes qu
           JOIN quiz_questions_map qqm ON qqm.quiz_id = qu.id
           JOIN questions q ON q.id = qqm.question_id
           WHERE q.topic_id = $1
             AND qu.status IN ('active', 'completed')
+            ${hasDifficultyColumn ? "AND COALESCE(qu.difficulty, 'medium') = $2" : ""}
             AND (
               NOT EXISTS (
                 SELECT 1
                 FROM quiz_attempts a
                 WHERE a.quiz_id = qu.id
-                  AND a.user_id = $2
+                  AND a.user_id = $3
                   AND a.status IN ('submitted', 'evaluated')
               )
               OR EXISTS (
                 SELECT 1
                 FROM quiz_attempts a
                 WHERE a.quiz_id = qu.id
-                  AND a.user_id = $2
+                  AND a.user_id = $3
                   AND a.status IN ('submitted', 'evaluated')
                   AND (
                     CASE
@@ -1359,6 +1320,51 @@ const getStudentRecommendationsV2 = async (req, res) => {
                   ) < 70
               )
             )
+        ) ranked
+        ORDER BY RANDOM()
+        LIMIT 3;
+      `;
+
+      let quizRes = await pool.query(queryWithDifficulty, [weak.topicId, targetDifficulty, resolvedUserId]);
+
+      if (quizRes.rows.length === 0 && hasDifficultyColumn) {
+        const fallbackQuery = `
+          SELECT *
+          FROM (
+            SELECT DISTINCT
+              qu.id,
+              qu.title,
+              COALESCE(qu.subject, 'General') AS subject,
+              COALESCE(qu.difficulty, 'medium') AS difficulty
+            FROM quizzes qu
+            JOIN quiz_questions_map qqm ON qqm.quiz_id = qu.id
+            JOIN questions q ON q.id = qqm.question_id
+            WHERE q.topic_id = $1
+              AND qu.status IN ('active', 'completed')
+              AND (
+                NOT EXISTS (
+                  SELECT 1
+                  FROM quiz_attempts a
+                  WHERE a.quiz_id = qu.id
+                    AND a.user_id = $2
+                    AND a.status IN ('submitted', 'evaluated')
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM quiz_attempts a
+                  WHERE a.quiz_id = qu.id
+                    AND a.user_id = $2
+                    AND a.status IN ('submitted', 'evaluated')
+                    AND (
+                      CASE
+                        WHEN COALESCE(a.total_marks, qu.total_marks, 0) > 0
+                        THEN a.score * 100.0 / COALESCE(a.total_marks, qu.total_marks, 1)
+                        ELSE 0
+                      END
+                    ) < 70
+                )
+              )
+          ) ranked
           ORDER BY RANDOM()
           LIMIT 3;
         `;
@@ -1369,38 +1375,41 @@ const getStudentRecommendationsV2 = async (req, res) => {
 
       if (topicQuizzes.length === 0) {
         const broadFallbackQuery = `
-          SELECT DISTINCT
-            qu.id,
-            qu.title,
-            COALESCE(qu.subject, 'General') AS subject,
-            ${hasDifficultyColumn ? "COALESCE(qu.difficulty, 'medium')" : "$2::text"} AS difficulty
-          FROM quizzes qu
-          JOIN quiz_questions_map qqm ON qqm.quiz_id = qu.id
-          JOIN questions q ON q.id = qqm.question_id
-          WHERE q.topic_id = $1
-            AND (
-              NOT EXISTS (
-                SELECT 1
-                FROM quiz_attempts a
-                WHERE a.quiz_id = qu.id
-                  AND a.user_id = $3
-                  AND a.status IN ('submitted', 'evaluated')
+          SELECT *
+          FROM (
+            SELECT DISTINCT
+              qu.id,
+              qu.title,
+              COALESCE(qu.subject, 'General') AS subject,
+              ${hasDifficultyColumn ? "COALESCE(qu.difficulty, 'medium')" : "$2::text"} AS difficulty
+            FROM quizzes qu
+            JOIN quiz_questions_map qqm ON qqm.quiz_id = qu.id
+            JOIN questions q ON q.id = qqm.question_id
+            WHERE q.topic_id = $1
+              AND (
+                NOT EXISTS (
+                  SELECT 1
+                  FROM quiz_attempts a
+                  WHERE a.quiz_id = qu.id
+                    AND a.user_id = $3
+                    AND a.status IN ('submitted', 'evaluated')
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM quiz_attempts a
+                  WHERE a.quiz_id = qu.id
+                    AND a.user_id = $3
+                    AND a.status IN ('submitted', 'evaluated')
+                    AND (
+                      CASE
+                        WHEN COALESCE(a.total_marks, qu.total_marks, 0) > 0
+                        THEN a.score * 100.0 / COALESCE(a.total_marks, qu.total_marks, 1)
+                        ELSE 0
+                      END
+                    ) < 70
+                )
               )
-              OR EXISTS (
-                SELECT 1
-                FROM quiz_attempts a
-                WHERE a.quiz_id = qu.id
-                  AND a.user_id = $3
-                  AND a.status IN ('submitted', 'evaluated')
-                  AND (
-                    CASE
-                      WHEN COALESCE(a.total_marks, qu.total_marks, 0) > 0
-                      THEN a.score * 100.0 / COALESCE(a.total_marks, qu.total_marks, 1)
-                      ELSE 0
-                    END
-                  ) < 70
-              )
-            )
+          ) ranked
           ORDER BY RANDOM()
           LIMIT 3;
         `;

@@ -20,7 +20,7 @@ if (IS_TEST) {
         // Prevent infinite loops if Redis isn't running locally yet
         const delay = Math.min(times * 50, 2000);
         if (times > 5) {
-            console.warn('⚠️ Could not connect to Redis. Retrying will be capped.');
+            console.warn('Could not connect to Redis. Retrying will be capped.');
         }
         return delay;
     };
@@ -33,7 +33,7 @@ if (IS_TEST) {
 
     redisClient.on('ready', () => {
         redisClient.isAvailable = true;
-        console.log('✅ Redis Ready!');
+        console.log('Redis Ready!');
         const { redisStatus } = require('../metrics');
         if (redisStatus) redisStatus.set(1);
     });
@@ -41,13 +41,13 @@ if (IS_TEST) {
     redisClient.on('error', (err) => {
         redisClient.isAvailable = false;
         if (redisClient.status !== 'reconnecting') {
-            console.error('❌ Redis Connection Error:', err.message);
+            console.error('Redis Connection Error:', err.message);
         }
     });
 
     redisClient.on('end', () => {
         redisClient.isAvailable = false;
-        console.warn('⚠️ Redis Disconnected');
+        console.warn('Redis Disconnected');
         const { redisStatus } = require('../metrics');
         if (redisStatus) redisStatus.set(0);
     });

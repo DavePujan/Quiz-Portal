@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { runBatch, normalizeLanguage, resolveLanguageId } = require("../utils/judge0");
-const boilerplates = require("../utils/boilerplates");
+const { buildWrappedCode } = require("../utils/codeExecution");
 const questions = require("../models/Question");
 const { auth } = require("../middleware/auth");
 const leaderboard = require("../models/Leaderboard");
@@ -91,12 +91,12 @@ router.post("/submit", auth, async (req, res) => {
 
     try {
         // Prepare Public Batch
-        if (!boilerplates[normalizedLanguage] || !languageId) {
+        if (!languageId) {
             return res.json({ verdict: "Language not supported" });
         }
 
         const publicSubmissions = q.testCases.public.map(tc => ({
-            source_code: boilerplates[normalizedLanguage](code, q.functionName, tc.input),
+            source_code: buildWrappedCode(code, normalizedLanguage, q.functionName, tc.input, q.signature),
             language_id: languageId,
             expected_output: tc.output,
             cpu_time_limit: 2,
@@ -127,7 +127,7 @@ router.post("/submit", auth, async (req, res) => {
 
         // If Public Passed, Run Hidden
         const hiddenSubmissions = q.testCases.hidden.map(tc => ({
-            source_code: boilerplates[normalizedLanguage](code, q.functionName, tc.input),
+            source_code: buildWrappedCode(code, normalizedLanguage, q.functionName, tc.input, q.signature),
             language_id: languageId,
             expected_output: tc.output,
             cpu_time_limit: 2,
@@ -210,7 +210,7 @@ router.post("/submit-async", auth, async (req, res) => {
         return res.json({ cached: true, ...submissionCache.get(cacheKey) });
     }
 
-    if (!boilerplates[normalizedLanguage] || !languageId) {
+    if (!languageId) {
         return res.json({ verdict: "Language not supported" });
     }
 

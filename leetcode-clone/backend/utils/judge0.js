@@ -10,6 +10,7 @@ const LANGUAGE_MAP = {
     javascript: 63,
     js: 63,
     python: 71,
+    py: 71,
     cpp: 54,
     c: 50,
     java: 62,
@@ -52,9 +53,14 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 const resolveSubmissionResult = async (token, headers, maxPolls = 20, pollMs = 1000) => {
     let data = null;
     for (let i = 0; i < maxPolls; i++) {
-        const pollRes = await axiosInstance.get(`${BASE_URL}/submissions/${token}`, { headers });
+        const pollRes = await axiosInstance.get(`${BASE_URL}/submissions/${token}?base64_encoded=true`, { headers });
         data = pollRes.data;
-        if (data?.status?.id > 2) return data;
+        if (data?.status?.id > 2) {
+            if (data.stdout) data.stdout = Buffer.from(data.stdout, "base64").toString("utf-8");
+            if (data.stderr) data.stderr = Buffer.from(data.stderr, "base64").toString("utf-8");
+            if (data.compile_output) data.compile_output = Buffer.from(data.compile_output, "base64").toString("utf-8");
+            return data;
+        }
         await delay(pollMs);
     }
     return data;
@@ -77,16 +83,16 @@ exports.run = async (params, retries = 3) => {
     let attempt = 0;
     while (attempt < retries) {
         try {
-            const { source_code, language_id, stdin, expected_output, cpu_time_limit = 2, memory_limit = 128000 } = params;
+            const { source_code, language_id, stdin, expected_output, cpu_time_limit = 2, memory_limit = 4096000 } = params;
 
             // wait=true → Judge0 returns final result directly, no polling needed
             const res = await axiosInstance.post(
-                `${BASE_URL}/submissions?wait=true`,
+                `${BASE_URL}/submissions?wait=true&base64_encoded=true`,
                 {
-                    source_code,
+                    source_code: Buffer.from(source_code).toString("base64"),
                     language_id,
-                    stdin,
-                    expected_output,
+                    stdin: stdin ? Buffer.from(String(stdin)).toString("base64") : null,
+                    expected_output: expected_output ? Buffer.from(String(expected_output)).toString("base64") : null,
                     cpu_time_limit,
                     memory_limit,
                     enable_network: false,
@@ -95,11 +101,21 @@ exports.run = async (params, retries = 3) => {
                 { headers }
             );
 
+            // Decode base64 outputs before returning
+            if (res.data) {
+                if (res.data.stdout) res.data.stdout = Buffer.from(res.data.stdout, "base64").toString("utf-8");
+                if (res.data.stderr) res.data.stderr = Buffer.from(res.data.stderr, "base64").toString("utf-8");
+                if (res.data.compile_output) res.data.compile_output = Buffer.from(res.data.compile_output, "base64").toString("utf-8");
+            }
+
             return res.data;
         } catch (err) {
             console.error(`Judge0 Error (Attempt ${attempt + 1}):`, err.message);
             if (err.response && (err.response.status === 401 || err.response.status === 403)) {
                 return { status: { description: "Invalid Judge0 API Key" } };
+            }
+            if (err.code === "ECONNREFUSED") {
+                return { status: { description: "Judge0 unavailable (service not running on configured host)" } };
             }
             attempt++;
             if (attempt >= retries) {
@@ -121,9 +137,16 @@ exports.runBatch = async (submissions) => {
             headers["X-Auth-Token"] = process.env.JUDGE0_API_KEY;
         }
 
+        const encodedSubmissions = submissions.map(s => ({
+            ...s,
+            source_code: Buffer.from(s.source_code).toString("base64"),
+            stdin: s.stdin ? Buffer.from(String(s.stdin)).toString("base64") : null,
+            expected_output: s.expected_output ? Buffer.from(String(s.expected_output)).toString("base64") : null
+        }));
+
         const res = await axiosInstance.post(
-            `${BASE_URL}/submissions/batch?wait=true`,
-            { submissions },
+            `${BASE_URL}/submissions/batch?wait=true&base64_encoded=true`,
+            { submissions: encodedSubmissions },
             { headers }
         );
 

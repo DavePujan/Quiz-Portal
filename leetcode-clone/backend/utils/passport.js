@@ -11,7 +11,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 async function syncToSupabase(user) {
     try {
         // Try to find existing profile to keep UUID if exists
-        let { data: existing } = await supabase.from("profiles").select("id").eq("email", user.email).single();
+        let { data: existing } = await supabase.from("profiles").select("id").eq("email", user.email).maybeSingle();
 
         const profile = {
             id: existing ? existing.id : crypto.randomUUID(),
@@ -25,9 +25,9 @@ async function syncToSupabase(user) {
         const { error } = await supabase.from("profiles").upsert(profile);
 
         if (error) {
-            console.error("❌ [Supabase] Sync Error:", error.message);
+            console.error("[Supabase] Sync Error:", error.message);
         } else {
-            console.log(`✅ [Supabase] Synced profile for ${user.email}`);
+            console.log(`[Supabase] Synced profile for ${user.email}`);
         }
     } catch (err) {
         console.error("[Supabase] Sync failed (Exception):", err.message);
@@ -50,7 +50,7 @@ passport.use(
 
                 if (!user) {
                     // Fallback: Check Supabase (Persistence Layer)
-                    const { data: sbUser, error } = await supabase.from("profiles").select("*").eq("email", email).single();
+                    const { data: sbUser, error } = await supabase.from("profiles").select("*").eq("email", email).maybeSingle();
                     if (error) console.error(`[Passport] Supabase error:`, error.message);
 
                     if (sbUser) {
@@ -93,7 +93,7 @@ passport.use(
 
                 if (!user) {
                     // Fallback: Check Supabase
-                    const { data: sbUser } = await supabase.from("profiles").select("*").eq("email", email).single();
+                    const { data: sbUser } = await supabase.from("profiles").select("*").eq("email", email).maybeSingle();
 
                     if (sbUser) {
                         user = {

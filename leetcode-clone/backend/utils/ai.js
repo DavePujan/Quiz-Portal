@@ -1,26 +1,198 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const OpenAI = require("openai");
+const Cerebras = require("@cerebras/cerebras_cloud_sdk");
 
-// Provider Abstraction Setup
-const generateAIResponse = async (prompt, apiKey, isJson = true) => {
-    if (!apiKey) throw new Error("AI API Key is required.");
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const config = isJson ? { responseMimeType: "application/json" } : {};
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest", generationConfig: config });
-    const result = await model.generateContent(prompt);
-    return result.response.text();
+// ─── Provider Registry ───────────────────────────────────────────────
+const ALLOWED_PROVIDERS = ["gemini", "openrouter", "cerebras", "mistral"];
+
+const PROVIDER_KEY_COLUMNS = {
+    gemini: "gemini_api_key",
+    openrouter: "openrouter_api_key",
+    cerebras: "cerebras_api_key",
+    mistral: "mistral_api_key"
 };
 
-// Helper: Safe JSON Parser
+const DEFAULT_MODELS = {
+    gemini: "gemini-2.5-flash",
+    openrouter: "google/gemma-4-31b-it:free",
+    cerebras: "gpt-oss-120b",
+    mistral: "mistral-small-latest"
+};
+
+// ─── Provider Implementations ────────────────────────────────────────
+
+async function generateGeminiResponse(prompt, apiKey, { isJson = true, model } = {}) {
+    if (!apiKey) throw new Error("Gemini API Key is required.");
+    try {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const config = isJson ? { responseMimeType: "application/json" } : {};
+        const selectedModel = model || DEFAULT_MODELS.gemini;
+        console.log("[Gemini] Sending request to model:", selectedModel);
+        const geminiModel = genAI.getGenerativeModel({
+            model: selectedModel,
+            generationConfig: config
+        });
+        const result = await geminiModel.generateContent(prompt);
+        if (!result || !result.response) {
+            throw new Error("Gemini returned an empty response. Check your API key or try again.");
+        }
+        const text = result.response.text();
+        console.log("[Gemini] Response received. Length:", text?.length || 0);
+        return text;
+    } catch (err) {
+        // Re-throw with a cleaner message for common Gemini errors
+        const msg = err.message || String(err);
+        if (msg.includes("API_KEY_INVALID") || msg.includes("PERMISSION_DENIED")) {
+            throw new Error("Invalid Gemini API key. Please update it in Settings.");
+        }
+        if (msg.includes("Could not find model") || msg.includes("is not found")) {
+            throw new Error(`Gemini model "${model || DEFAULT_MODELS.gemini}" not found. It may have been deprecated.`);
+        }
+        throw err;
+    }
+}
+
+async function generateOpenRouterResponse(prompt, apiKey, { isJson = true, model } = {}) {
+    if (!apiKey) throw new Error("OpenRouter API Key is required.");
+
+    const client = new OpenAI.default({
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: apiKey,
+        timeout: 120000, // 2 minute timeout for free models
+        defaultHeaders: {
+            "HTTP-Referer": "http://localhost:5173",
+            "X-Title": "Quiz Portal"
+        }
+    });
+
+    const messages = [{ role: "user", content: prompt }];
+    if (isJson) {
+        messages.unshift({
+            role: "system",
+            content: "You are a helpful assistant. Always respond with valid JSON only. No markdown fences, no extra text."
+        });
+    }
+
+    const selectedModel = model || DEFAULT_MODELS.openrouter;
+    console.log("[OpenRouter] Sending request to model:", selectedModel);
+    const completion = await client.chat.completions.create({
+        model: selectedModel,
+        messages,
+        temperature: 0.7,
+        max_tokens: 4096
+    });
+
+    console.log("[OpenRouter] Response received. choices:", completion?.choices?.length ?? "MISSING");
+
+    if (!completion?.choices || completion.choices.length === 0) {
+        console.error("[OpenRouter] Unexpected response shape:", JSON.stringify(completion).substring(0, 500));
+        throw new Error("OpenRouter returned an empty or invalid response. The free model may be overloaded — try again.");
+    }
+
+    return completion.choices[0]?.message?.content || "";
+}
+
+async function generateCerebrasResponse(prompt, apiKey, { isJson = true, model } = {}) {
+    if (!apiKey) throw new Error("Cerebras API Key is required.");
+
+    const client = new Cerebras({
+        apiKey: apiKey
+    });
+
+    const messages = [{ role: "user", content: prompt }];
+    if (isJson) {
+        messages.unshift({
+            role: "system",
+            content: "You are a helpful assistant. Always respond with valid JSON only. No markdown fences, no extra text."
+        });
+    }
+
+    const selectedModel = model || DEFAULT_MODELS.cerebras;
+    console.log("[Cerebras] Sending request to model:", selectedModel);
+    
+    try {
+        const completion = await client.chat.completions.create({
+            model: selectedModel,
+            messages,
+            temperature: 0.7,
+            max_completion_tokens: 4096
+        });
+
+        console.log("[Cerebras] Response received. choices:", completion?.choices?.length ?? "MISSING");
+
+        if (!completion?.choices || completion.choices.length === 0) {
+            console.error("[Cerebras] Unexpected response shape:", JSON.stringify(completion).substring(0, 500));
+            throw new Error("Cerebras returned an empty or invalid response.");
+        }
+
+        return completion.choices[0]?.message?.content || "";
+    } catch (err) {
+        console.error("[Cerebras] API Error:", err.message);
+        throw err;
+    }
+}
+
+async function generateMistralResponse(prompt, apiKey, { isJson = true, model } = {}) {
+    if (!apiKey) throw new Error("Mistral API Key is required.");
+
+    const { Mistral } = await import("@mistralai/mistralai");
+    const client = new Mistral({ apiKey: apiKey });
+
+    const messages = [{ role: "user", content: prompt }];
+    if (isJson) {
+        messages.unshift({
+            role: "system",
+            content: "You are a helpful assistant. Always respond with valid JSON only. No markdown fences, no extra text."
+        });
+    }
+
+    const selectedModel = model || DEFAULT_MODELS.mistral;
+    console.log("[Mistral] Sending request to model:", selectedModel);
+
+    try {
+        const response = await client.chat.complete({
+            model: selectedModel,
+            messages: messages,
+            temperature: 0.7,
+            maxTokens: 4096,
+            responseFormat: isJson ? { type: "json_object" } : { type: "text" }
+        });
+
+        console.log("[Mistral] Response received. choices:", response?.choices?.length ?? "MISSING");
+
+        if (!response?.choices || response.choices.length === 0) {
+            console.error("[Mistral] Unexpected response shape:", JSON.stringify(response).substring(0, 500));
+            throw new Error("Mistral returned an empty or invalid response.");
+        }
+
+        return response.choices[0]?.message?.content || "";
+    } catch (err) {
+        console.error("[Mistral] API Error:", err.message);
+        throw err;
+    }
+}
+
+// Provider dispatch map
+const providers = {
+    gemini: generateGeminiResponse,
+    openrouter: generateOpenRouterResponse,
+    cerebras: generateCerebrasResponse,
+    mistral: generateMistralResponse
+};
+
+// ─── Shared Utilities ────────────────────────────────────────────────
+
+// Safe JSON parser — handles markdown fencing, invisible chars, and common quirks
 function safeParseJSON(raw) {
     try {
         if (!raw) return null;
-        // remove invisible chars & markdown
-        const cleaned = raw.replace(/```json|```/g, "").trim();
+        // Remove invisible chars & markdown code fences
+        const cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
         const parsed = JSON.parse(cleaned);
 
-        // Validate expected schema
-        if (typeof parsed.logic_score !== "number" || parsed.logic_score < 0 || parsed.logic_score > 1) {
-            if (parsed.logic_score > 1 && parsed.logic_score <= 10) parsed.logic_score /= 10; // Auto-fix 0-10 to 0-1
+        // Auto-fix logic_score 0-10 → 0-1 if present
+        if (typeof parsed.logic_score === "number" && parsed.logic_score > 1 && parsed.logic_score <= 10) {
+            parsed.logic_score /= 10;
         }
         return parsed;
     } catch (e) {
@@ -28,9 +200,81 @@ function safeParseJSON(raw) {
     }
 }
 
-exports.analyzeCode = async ({ code, question, language, input_format, output_format, max_marks, apiKey }) => {
-    try {
+// Normalize quiz generation response into a clean array
+function normalizeQuizResponse(raw) {
+    const parsed = safeParseJSON(raw);
 
+    if (!parsed) {
+        throw new Error("Failed to parse AI response as JSON. Raw: " + (raw || "").substring(0, 200));
+    }
+
+    // Direct array
+    if (Array.isArray(parsed)) return parsed;
+
+    // Wrapped in { questions: [...] }
+    if (parsed.questions && Array.isArray(parsed.questions)) return parsed.questions;
+
+    // Wrapped in { data: [...] }
+    if (parsed.data && Array.isArray(parsed.data)) return parsed.data;
+
+    throw new Error("AI response is valid JSON but not in expected format (array or {questions: []}).");
+}
+
+// ─── Exported Functions ──────────────────────────────────────────────
+
+exports.ALLOWED_PROVIDERS = ALLOWED_PROVIDERS;
+exports.PROVIDER_KEY_COLUMNS = PROVIDER_KEY_COLUMNS;
+exports.DEFAULT_MODELS = DEFAULT_MODELS;
+
+exports.generateQuiz = async ({ prompt, apiKey, provider = "gemini", model }) => {
+    try {
+        if (!ALLOWED_PROVIDERS.includes(provider)) {
+            throw new Error(`Invalid provider: ${provider}. Allowed: ${ALLOWED_PROVIDERS.join(", ")}`);
+        }
+
+        const aiPrompt = `
+You are a quiz generation assistant.
+User Request: "${prompt}"
+
+Generate a list of questions based on the user's request. 
+Format the output as a valid JSON array of objects.
+
+Each object should follow this schema:
+{
+  "question": "Question text...",
+  "type": "mcq" | "code",
+  "marks": number,
+  "options": ["Opt1", "Opt2", "Opt3", "Opt4"], // Only for MCQ (4 options)
+  "answer": "Correct Option Text", // Matches one of the options exactly
+    "language": "javascript" | "python" | "c" | "cpp" | "java" | "php", // Only for Code
+    "functionName": "addTwo", // Only for Code (Use a meaningful LeetCode-style function name)
+  "inputFormat": "e.g. n lines of integers", // Only for Code
+  "outputFormat": "e.g. a single integer", // Only for Code
+  "testCases": [ // Only for Code (provide 2-3 examples)
+    { "input": "...", "output": "...", "isHidden": false }
+  ]
+}
+
+IMPORTANT Rules:
+- If type is 'mcq', ensure 'options' has 4 items and 'answer' matches one exactly.
+- If type is 'code', ensure 'testCases' are provided and valid.
+- If type is 'code', choose a concise meaningful functionName that matches the problem, like addTwo, reverseString, findMax, isPalindrome.
+- Be creative with the content but strict with the JSON structure.
+- Return ONLY a valid JSON array. No markdown, no explanation.
+`;
+
+        const generateFn = providers[provider];
+        const raw = await generateFn(aiPrompt, apiKey, { isJson: true, model });
+        return normalizeQuizResponse(raw);
+
+    } catch (err) {
+        console.error(`AI Generate Error [${provider}]:`, err.message);
+        throw new Error("Failed to generate quiz from AI: " + err.message);
+    }
+};
+
+exports.analyzeCode = async ({ code, question, language, input_format, output_format, max_marks, apiKey, provider = "gemini", model }) => {
+    try {
         const prompt = `
 You are an academic code evaluator for beginners.
 
@@ -61,7 +305,8 @@ Return ONLY a valid JSON object with EXACT keys:
 }
 `;
 
-        const raw = await generateAIResponse(prompt, apiKey, true);
+        const generateFn = providers[provider] || providers.gemini;
+        const raw = await generateFn(prompt, apiKey, { isJson: true, model });
         const parsed = safeParseJSON(raw);
 
         if (!parsed) throw new Error("Invalid AI response: " + raw);
@@ -69,7 +314,7 @@ Return ONLY a valid JSON object with EXACT keys:
         return parsed;
 
     } catch (err) {
-        console.error("Gemini AI Error:", err.message);
+        console.error("AI Code Analysis Error:", err.message);
         // Fallback
         return {
             logic_score: 0,
@@ -79,58 +324,8 @@ Return ONLY a valid JSON object with EXACT keys:
     }
 };
 
-exports.generateQuiz = async ({ prompt, apiKey }) => {
+exports.classifyQuestion = async ({ questionText, apiKey, provider = "gemini", model }) => {
     try {
-
-        const aiPrompt = `
-You are a quiz generation assistant.
-User Request: "${prompt}"
-
-Generate a list of questions based on the user's request. 
-Format the output as a valid JSON array of objects.
-
-Each object should follow this schema:
-{
-  "question": "Question text...",
-  "type": "mcq" | "code",
-  "marks": number,
-  "options": ["Opt1", "Opt2", "Opt3", "Opt4"], // Only for MCQ (4 options)
-  "answer": "Correct Option Text", // Matches one of the options exactly
-  "language": "javascript" | "python" | "cpp", // Only for Code
-  "functionName": "solution", // Only for Code (The name of the function to be called)
-  "inputFormat": "e.g. n lines of integers", // Only for Code
-  "outputFormat": "e.g. a single integer", // Only for Code
-  "testCases": [ // Only for Code (provide 2-3 examples)
-    { "input": "...", "output": "...", "isHidden": false }
-  ]
-}
-
-IMPORTANT Rules:
-- If type is 'mcq', ensure 'options' has 4 items and 'answer' matches one exactly.
-- If type is 'code', ensure 'testCases' are provided and valid.
-- Be creative with the content but strict with the JSON structure.
-`;
-
-        const raw = await generateAIResponse(aiPrompt, apiKey, true);
-        const parsed = safeParseJSON(raw);
-
-        // Expecting an array, but safeParseJSON might return object if wrapped.
-        if (parsed) {
-            if (Array.isArray(parsed)) return parsed;
-            if (parsed.questions && Array.isArray(parsed.questions)) return parsed.questions;
-        }
-
-        throw new Error("Invalid AI response structure");
-
-    } catch (err) {
-        console.error("Gemini AI Generate Error:", err.message);
-        throw new Error("Failed to generate quiz from AI: " + err.message);
-    }
-};
-
-exports.classifyQuestion = async ({ questionText, apiKey }) => {
-    try {
-
         const prompt = `
 You are an expert computer science educator.
 
@@ -159,10 +354,11 @@ Rules:
 - If unsure, return "Other"
 `;
 
-        const rawTopic = await generateAIResponse(prompt, apiKey, false);
+        const generateFn = providers[provider] || providers.gemini;
+        const rawTopic = await generateFn(prompt, apiKey, { isJson: false, model });
         const topic = rawTopic.trim();
 
-        // Basic validation against allowing list
+        // Basic validation against allowed list
         const allowed = [
             "Algorithms", "Data Structures", "Correctness", "Complexity",
             "Logic & Reasoning", "Recursion", "Mathematical Foundations",

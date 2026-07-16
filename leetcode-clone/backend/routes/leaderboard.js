@@ -9,7 +9,7 @@ router.get("/:questionId", async (req, res) => {
     const cacheKey = `leaderboard:question:${questionId}`;
 
     try {
-        // 1️⃣ Check Cache First
+        //  Check Cache First
         let cached = null;
         if (redisClient.isAvailable) {
             cached = await redisClient.get(cacheKey);
@@ -20,7 +20,7 @@ router.get("/:questionId", async (req, res) => {
             return res.json(JSON.parse(cached));
         }
 
-        // 2️⃣ If not in cache → Fetch from DB (Simulated via array methods)
+        //  If not in cache → Fetch from DB (Simulated via array methods)
         const entries = leaderboard.filter(e => e.questionId === questionId);
 
         // Sort: Runtime ASC, then Memory ASC (Optimized parsing)
@@ -33,7 +33,7 @@ router.get("/:questionId", async (req, res) => {
 
         const top10 = entries.slice(0, 10);
 
-        // 3️⃣ Store deeply processed result in Redis (Expire in 60s)
+        //  Store deeply processed result in Redis (Expire in 60s)
         if (redisClient.isAvailable) {
             await redisClient.set(cacheKey, JSON.stringify(top10), "EX", 60);
         }
