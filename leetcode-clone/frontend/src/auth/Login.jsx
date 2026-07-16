@@ -1,5 +1,5 @@
 import { useState, useContext, useEffect } from "react";
-import { AuthContext } from "../context/AuthContext";
+import { AuthContext } from "../context/authStore";
 import axios from "axios";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 // import { LogIn, Github, Mail } from "lucide-react"; // Removed: Using inline SVGs instead
@@ -19,7 +19,7 @@ const GithubIcon = () => (
 );
 
 export default function Login() {
-    const { login, role } = useContext(AuthContext);
+    const { login, role, isAuthReady } = useContext(AuthContext);
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
@@ -28,12 +28,13 @@ export default function Login() {
 
     // Redirect if already logged in
     useEffect(() => {
+        if (!isAuthReady) return;
         if (role) {
             if (role === 'teacher') navigate("/teacher");
             else if (role === 'admin') navigate("/admin");
             else navigate("/student/dashboard");
         }
-    }, [role, navigate]);
+    }, [role, navigate, isAuthReady]);
 
     useEffect(() => {
         const r = searchParams.get("role");

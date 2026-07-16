@@ -7,15 +7,28 @@ const editorOptions = {
     fontLigatures: true,
     cursorSmoothCaretAnimation: "on",
     automaticLayout: true,
-    quickSuggestions: false,
+    quickSuggestions: true,
     parameterHints: { enabled: false },
     hover: { enabled: false },
-    suggestOnTriggerCharacters: false,
-    wordBasedSuggestions: false,
+    suggestOnTriggerCharacters: true,
+    wordBasedSuggestions: "currentDocument",
     renderWhitespace: "none",
     scrollBeyondLastLine: false,
     smoothScrolling: false,
-    renderLineHighlight: "none"
+    renderLineHighlight: "none",
+    autoClosingBrackets: "always",
+    autoClosingQuotes: "always",
+    autoSurround: "languageDefined",
+    bracketPairColorization: { enabled: true },
+    formatOnType: true
+};
+
+const resolveMonacoLanguage = (language) => {
+    const normalized = String(language || "").trim().toLowerCase();
+    if (normalized === "js") return "javascript";
+    if (normalized === "cpp") return "cpp";
+    if (normalized === "py") return "python";
+    return normalized || "javascript";
 };
 
 function CodeEditor({ language, code, setCode, template, width = "650px", height = "400px", lockFirstLine = false, readOnly = false }) {
@@ -54,7 +67,7 @@ function CodeEditor({ language, code, setCode, template, width = "650px", height
         <Editor
             width={width}
             height={height}
-            language={language === "js" ? "javascript" : language}
+            language={resolveMonacoLanguage(language)}
             value={code}
             theme="vs-dark"
             onChange={handleEditorChange}

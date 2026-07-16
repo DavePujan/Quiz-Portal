@@ -1,6 +1,6 @@
 import { useEffect, useContext } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { AuthContext } from "../context/AuthContext";
+import { AuthContext } from "../context/authStore";
 
 export default function OAuthSuccess() {
     const [searchParams] = useSearchParams();

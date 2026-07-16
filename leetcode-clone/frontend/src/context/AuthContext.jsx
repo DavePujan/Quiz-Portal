@@ -1,15 +1,14 @@
-import { createContext, useState, useEffect, useContext } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-
-export const AuthContext = createContext();
-
-export const useAuth = () => useContext(AuthContext);
+import axios from "axios";
+import { AuthContext } from "./authStore";
 
 export function AuthProvider({ children }) {
     // Actual access token lives in HttpOnly cookie — this is a backward-compatible flag
     // so existing components that check `if (token)` still work without mass refactoring
     const [role, setRole] = useState(localStorage.getItem("role"));
     const [user, setUser] = useState(null);
+    const [isAuthReady, setIsAuthReady] = useState(false);
     const token = role ? true : null; // Derived boolean for compatibility
 
     const login = (newRole) => {
@@ -21,14 +20,33 @@ export function AuthProvider({ children }) {
     const logout = async () => {
         try {
             // Tell backend to explicitly purge both token cookies
-            await import("axios").then(axios => axios.default.post("http://localhost:5000/auth/logout", {}, { withCredentials: true }));
-        } catch(e) {}
+            await axios.post("http://localhost:5000/auth/logout", {}, { withCredentials: true });
+        } catch (e) {
+            console.warn("Logout request failed:", e);
+        }
         
-        localStorage.clear();
+        localStorage.removeItem("role");
         setRole(null);
         setUser(null);
         window.location.href = "/login";
     };
+
+    useEffect(() => {
+        const validateSession = async () => {
+            try {
+                // If refresh works, session cookies are still valid.
+                await axios.post("http://localhost:5000/auth/refresh", {}, { withCredentials: true });
+            } catch {
+                // Stale local role can cause redirect loops between /login and protected routes.
+                localStorage.removeItem("role");
+                setRole(null);
+            } finally {
+                setIsAuthReady(true);
+            }
+        };
+
+        validateSession();
+    }, []);
 
     useEffect(() => {
         const syncProfile = async () => {
@@ -63,7 +81,7 @@ export function AuthProvider({ children }) {
     }, []);
 
     return (
-        <AuthContext.Provider value={{ token, role, user, login, logout }}>
+        <AuthContext.Provider value={{ token, role, user, login, logout, isAuthReady }}>
             {children}
         </AuthContext.Provider>
     );

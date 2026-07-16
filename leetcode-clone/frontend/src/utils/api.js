@@ -32,6 +32,7 @@ api.interceptors.response.use(
             } catch (err) {
                 // Refresh failed, session completely expired, redirect to login
                 console.error("Refresh failed", err);
+                localStorage.removeItem("role");
                 window.location.href = "/login";
                 return Promise.reject(err);
             }
@@ -40,9 +41,7 @@ api.interceptors.response.use(
     }
 );
 
-export const submitCode = (data) => api.post("/api/submit", data);
 export const submitCodeAsync = (data, mode = "submit") => api.post(`/api/submit-async?mode=${mode}`, data);
-export const createProblem = (data) => api.post("/api/teacher/problem", data);
 export const getUsers = () => api.get("/api/admin/users");
 export const promoteUser = (email, role) => api.patch("/api/admin/promote", { email, role });
 
@@ -71,5 +70,10 @@ export const getStudentComprehensiveAnalytics = (userId) => api.get(`/api/analyt
 export const getStudentRecommendations = (userId) => api.get(`/api/analytics/student/${userId}/recommendations`);
 export const getStudentRecommendationsV2 = (userId) => api.get(`/api/analytics/student/${userId}/recommendations-v2`);
 export const exportTeacherQuizAnalytics = (quizId) => api.get(`/api/analytics/teacher/quiz/${quizId}/export`, { responseType: "blob" });
+
+// AI Provider Management
+export const getAiProviders = () => api.get("/api/teacher/settings/ai-providers");
+export const saveAiKey = (provider, apiKey) => api.post("/api/teacher/settings/ai-key", { provider, apiKey });
+export const removeAiKey = (provider) => api.delete("/api/teacher/settings/ai-key", { data: { provider } });
 
 export default api;

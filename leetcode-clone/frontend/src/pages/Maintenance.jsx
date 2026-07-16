@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { AuthContext } from '../context/AuthContext';
+import { AuthContext } from '../context/authStore';
 
 export default function Maintenance() {
     const { token, role, logout } = useContext(AuthContext);

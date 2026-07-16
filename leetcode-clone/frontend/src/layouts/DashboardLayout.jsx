@@ -1,6 +1,6 @@
 import { useContext } from "react";
 import Sidebar from "../components/Sidebar";
-import { AuthContext } from "../context/AuthContext";
+import { AuthContext } from "../context/authStore";
 
 export default function DashboardLayout({ children }) {
     const { role } = useContext(AuthContext);

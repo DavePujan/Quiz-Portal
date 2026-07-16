@@ -1,7 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 // import { LayoutDashboard, PlusCircle, FileText, Users, Settings, LogOut, ShieldAlert } from "lucide-react";
 import { useContext } from "react";
-import { AuthContext } from "../context/AuthContext";
+import { AuthContext } from "../context/authStore";
 
 export default function Sidebar() {
     const { role, logout } = useContext(AuthContext);
@@ -46,6 +46,11 @@ export default function Sidebar() {
                             {/* <FileText size={20} /> */}
                             <span>[E] </span>
                             <span>Evaluations</span>
+                        </Link>
+                        <Link to="/teacher/settings" className={navItemClass("/teacher/settings")}>
+                            {/* <Settings size={20} /> */}
+                            <span>[S] </span>
+                            <span>Settings</span>
                         </Link>
                     </>
                 )}

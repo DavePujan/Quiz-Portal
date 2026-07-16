@@ -1,10 +1,10 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-dom";
-import Problem from "./pages/Problem";
 import Login from "./auth/Login";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import OAuthSuccess from "./auth/OAuthSuccess";
-import { AuthProvider, AuthContext } from "./context/AuthContext";
-import { useContext, useState, useEffect } from "react";
+import { AuthProvider } from "./context/AuthContext";
+import { AuthContext } from "./context/authStore";
+import { useContext, useState } from "react";
 import { Toaster } from "react-hot-toast";
 import "./styles/common.css";
 import { Menu, X } from "lucide-react";
@@ -32,6 +32,7 @@ import Evaluations from "./pages/teacher/Evaluations";
 import QuizBuilder from "./pages/teacher/QuizBuilder";
 import EvaluationViewer from "./pages/teacher/EvaluationViewer";
 import QuizAnalytics from "./pages/teacher/QuizAnalytics";
+import TeacherSettings from "./pages/teacher/TeacherSettings";
 
 // Admin Pages
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -226,6 +227,7 @@ export default function App() {
           <Route path="/teacher/evaluations" element={<ProtectedRoute role="teacher"><DashboardLayout><Evaluations /></DashboardLayout></ProtectedRoute>} />
           <Route path="/teacher/evaluation/:id" element={<ProtectedRoute role="teacher"><DashboardLayout><EvaluationViewer /></DashboardLayout></ProtectedRoute>} />
           <Route path="/teacher/quiz/:id/analytics" element={<ProtectedRoute role="teacher"><DashboardLayout><QuizAnalytics /></DashboardLayout></ProtectedRoute>} />
+          <Route path="/teacher/settings" element={<ProtectedRoute role="teacher"><DashboardLayout><TeacherSettings /></DashboardLayout></ProtectedRoute>} />
 
           {/* Admin Routes */}
           <Route path="/admin" element={<ProtectedRoute role="admin"><DashboardLayout><AdminDashboard /></DashboardLayout></ProtectedRoute>} />
