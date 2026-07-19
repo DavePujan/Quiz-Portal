@@ -22,6 +22,14 @@ const users = [
         role: "admin",
         provider: "local",
         isVerified: true
+    },
+    {
+        id: 4,
+        email: "master@test.com",
+        password: "$2b$10$DHpOtH1eSROzewp8bQjFt..aSCsvy9GrInyHi6CXZUM8JCm6ROySq", // password: "password"
+        role: "master_admin",
+        provider: "local",
+        isVerified: true
     }
 ];
 

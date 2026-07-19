@@ -28,20 +28,28 @@ exports.auth = async (req, res, next) => {
             let mSettingCache = null;
 
             if (redisClient.isAvailable) {
-                mSettingCache = await redisClient.get("settings:maintenanceMode");
+                try {
+                    mSettingCache = await redisClient.get("settings:maintenanceMode");
+                } catch (rErr) {
+                    console.error("Redis get settings:maintenanceMode failed in auth middleware:", rErr);
+                }
             }
 
             if (mSettingCache !== null) {
                 isMaintenanceMode = JSON.parse(mSettingCache);
             } else {
-                const { data: mSetting } = await supabase.from("settings").select("value").eq("key", "maintenanceMode").single();
+                const { data: mSetting } = await supabase.from("settings").select("value").eq("key", "maintenanceMode").maybeSingle();
                 if (mSetting) isMaintenanceMode = mSetting.value;
                 if (redisClient.isAvailable) {
-                    await redisClient.set("settings:maintenanceMode", JSON.stringify(isMaintenanceMode), "EX", 60);
+                    try {
+                        await redisClient.set("settings:maintenanceMode", JSON.stringify(isMaintenanceMode), "EX", 60);
+                    } catch (rErr) {
+                        console.error("Redis set settings:maintenanceMode failed in auth middleware:", rErr);
+                    }
                 }
             }
 
-            if (isMaintenanceMode === true && req.user.role !== 'admin') {
+            if (isMaintenanceMode === true && req.user.role !== 'master_admin') {
                 return res.status(503).json({ error: "System is in maintenance mode." });
             }
         } catch (sErr) {
