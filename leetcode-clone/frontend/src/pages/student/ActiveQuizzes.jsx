@@ -83,7 +83,7 @@ const ActiveQuizzes = () => {
                                     <div className="flex items-center justify-between text-xs text-gray-500 mb-6 font-mono">
                                         <div>
                                             <span className="block text-gray-600 mb-1 uppercase tracking-wider">Created by</span>
-                                            <span className="text-gray-300">{quiz.creator?.full_name || "Teacher"}</span>
+                                            <span className="text-gray-300">{quiz.creator?.full_name || quiz.course_offering?.teacher?.full_name || "Teacher"}</span>
                                         </div>
                                         <div className="text-right">
                                             <span className="block text-gray-600 mb-1 uppercase tracking-wider">Duration</span>

@@ -55,15 +55,7 @@ export default function AdminSettings() {
                 /> Allow Teacher Role
             </label>
 
-            <label className="block mb-3">
-                <input
-                    type="checkbox"
-                    checked={settings.maintenanceMode}
-                    onChange={e =>
-                        setSettings({ ...settings, maintenanceMode: e.target.checked })
-                    }
-                /> Maintenance Mode
-            </label>
+
 
             <button className="btn-primary mt-4" onClick={updateSettingsFn}>
                 Save Settings

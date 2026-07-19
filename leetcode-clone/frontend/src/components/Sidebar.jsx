@@ -1,10 +1,10 @@
 import { Link, useLocation } from "react-router-dom";
-// import { LayoutDashboard, PlusCircle, FileText, Users, Settings, LogOut, ShieldAlert } from "lucide-react";
+import { Sun, Moon } from "lucide-react";
 import { useContext } from "react";
 import { AuthContext } from "../context/authStore";
 
 export default function Sidebar() {
-    const { role, logout } = useContext(AuthContext);
+    const { role, logout, profile, theme, toggleTheme } = useContext(AuthContext);
     const location = useLocation();
 
     const isActive = (path) => location.pathname === path;
@@ -80,10 +80,39 @@ export default function Sidebar() {
                         </Link>
                     </>
                 )}
+
+                {role === "master_admin" && (
+                    <>
+                        <div className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-3 px-2 mt-2">Control</div>
+                        <Link to="/master" className={navItemClass("/master")}>
+                            <span>[M] </span>
+                            <span>Master Panel</span>
+                        </Link>
+                    </>
+                )}
             </nav>
 
             {/* User Profile / Logout */}
             <div className="p-4 border-t border-gray-800/50 bg-[#050505]">
+                {profile && (
+                    <div className="px-4 py-3 mb-3 bg-white/5 rounded-lg border border-white/10">
+                        <p className="text-sm font-bold text-white truncate">{profile.name}</p>
+                        <p className="text-[10px] text-gray-500 truncate mt-0.5">{profile.college}</p>
+                        <p className="text-[10px] text-primary truncate uppercase tracking-widest mt-1 font-semibold">{profile.department} Dept</p>
+                    </div>
+                )}
+                
+                <button
+                    onClick={toggleTheme}
+                    className="flex items-center justify-between w-full px-4 py-2.5 mb-2 text-sm text-gray-400 hover:bg-white/5 hover:text-white rounded-lg border border-gray-800 transition-colors"
+                >
+                    <span className="flex items-center gap-2">
+                        {theme === "light" ? <Sun size={16} /> : <Moon size={16} />}
+                        <span>{theme === "light" ? "Light Mode" : "Dark Mode"}</span>
+                    </span>
+                    <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded uppercase tracking-wider text-gray-500">Toggle</span>
+                </button>
+
                 <button
                     onClick={logout}
                     className="flex items-center gap-3 w-full px-4 py-3 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-500/20"

@@ -8,6 +8,8 @@ export function AuthProvider({ children }) {
     // so existing components that check `if (token)` still work without mass refactoring
     const [role, setRole] = useState(localStorage.getItem("role"));
     const [user, setUser] = useState(null);
+    const [profile, setProfile] = useState(null);
+    const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
     const [isAuthReady, setIsAuthReady] = useState(false);
     const token = role ? true : null; // Derived boolean for compatibility
 
@@ -28,6 +30,7 @@ export function AuthProvider({ children }) {
         localStorage.removeItem("role");
         setRole(null);
         setUser(null);
+        setProfile(null);
         window.location.href = "/login";
     };
 
@@ -47,6 +50,41 @@ export function AuthProvider({ children }) {
 
         validateSession();
     }, []);
+
+    useEffect(() => {
+        const fetchProfile = async () => {
+            if (!role) {
+                setProfile(null);
+                return;
+            }
+            try {
+                const res = await axios.get("http://localhost:5000/auth/profile", { withCredentials: true });
+                setProfile(res.data);
+            } catch (err) {
+                console.error("Failed to fetch detailed profile:", err);
+                setProfile(null);
+            }
+        };
+
+        if (isAuthReady) {
+            fetchProfile();
+        }
+    }, [role, isAuthReady]);
+
+    useEffect(() => {
+        if (theme === "light") {
+            document.body.classList.add("theme-light");
+            document.body.classList.remove("theme-dark");
+        } else {
+            document.body.classList.remove("theme-light");
+            document.body.classList.add("theme-dark");
+        }
+        localStorage.setItem("theme", theme);
+    }, [theme]);
+
+    const toggleTheme = () => {
+        setTheme(prev => prev === "light" ? "dark" : "light");
+    };
 
     useEffect(() => {
         const syncProfile = async () => {
@@ -81,7 +119,7 @@ export function AuthProvider({ children }) {
     }, []);
 
     return (
-        <AuthContext.Provider value={{ token, role, user, login, logout, isAuthReady }}>
+        <AuthContext.Provider value={{ token, role, user, profile, setProfile, login, logout, isAuthReady, theme, toggleTheme }}>
             {children}
         </AuthContext.Provider>
     );

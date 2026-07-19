@@ -32,6 +32,7 @@ export default function Login() {
         if (role) {
             if (role === 'teacher') navigate("/teacher");
             else if (role === 'admin') navigate("/admin");
+            else if (role === 'master_admin') navigate("/master");
             else navigate("/student/dashboard");
         }
     }, [role, navigate, isAuthReady]);
@@ -55,6 +56,7 @@ export default function Login() {
 
             if (res.data.role === 'teacher') navigate("/teacher");
             else if (res.data.role === 'admin') navigate("/admin");
+            else if (res.data.role === 'master_admin') navigate("/master");
             else navigate("/student/dashboard");
 
         } catch (err) {
@@ -176,6 +178,7 @@ export default function Login() {
                             <span className="cursor-pointer hover:text-gray-400" onClick={() => { setEmail("teacher@test.com"); setPassword("password"); }}>Teacher</span>
                             <span className="cursor-pointer hover:text-gray-400" onClick={() => { setEmail("student@test.com"); setPassword("password"); }}>Student</span>
                             <span className="cursor-pointer hover:text-gray-400" onClick={() => { setEmail("admin@test.com"); setPassword("password"); }}>Admin</span>
+                            <span className="cursor-pointer hover:text-gray-400" onClick={() => { setEmail("master@test.com"); setPassword("password"); }}>Master Admin</span>
                         </div>
                     </div>
                 </div>

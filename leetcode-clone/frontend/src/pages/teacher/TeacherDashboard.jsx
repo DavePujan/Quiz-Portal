@@ -7,7 +7,9 @@ export default function TeacherDashboard() {
         active: 0,
         upcoming: 0,
         pending: 0,
-        students: 0
+        students: 0,
+        college: "",
+        department: ""
     });
 
     const [quizzes, setQuizzes] = useState([]);
@@ -53,7 +55,16 @@ export default function TeacherDashboard() {
 
     return (
         <div className="p-6">
-            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-linear-to-r from-blue-400 to-purple-500 mb-8">Teacher Dashboard</h1>
+            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-linear-to-r from-blue-400 to-purple-500 mb-2">Teacher Dashboard</h1>
+            {stats.college ? (
+                <p className="text-gray-400 text-xs font-semibold uppercase tracking-widest mb-8 flex items-center gap-2">
+                    <span>{stats.college}</span>
+                    <span className="text-gray-600">&bull;</span>
+                    <span className="text-primary">{stats.department} Department</span>
+                </p>
+            ) : (
+                <div className="h-4 mb-8"></div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <StatCard title="Active Quizzes" value={activeQuizzes.length} />

@@ -5,8 +5,8 @@ import { AuthContext } from "../context/authStore";
 export default function DashboardLayout({ children }) {
     const { role } = useContext(AuthContext);
 
-    // Only show sidebar for teacher and admin
-    const showSidebar = role === "teacher" || role === "admin";
+    // Only show sidebar for teacher, admin and master_admin
+    const showSidebar = role === "teacher" || role === "admin" || role === "master_admin";
 
     return (
         <div className="flex h-screen bg-background text-white overflow-hidden">

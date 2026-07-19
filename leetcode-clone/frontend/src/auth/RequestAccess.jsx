@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
+import api from "../utils/api";
 
 export default function RequestAccess() {
     const [searchParams] = useSearchParams();
@@ -11,8 +12,10 @@ export default function RequestAccess() {
     const [password, setPassword] = useState("");
     const [role, setRole] = useState("student");
     const [department, setDepartment] = useState("");
+    const [institutionId, setInstitutionId] = useState("");
     const [provider, setProvider] = useState("local");
 
+    const [institutions, setInstitutions] = useState([]);
     const [msg, setMsg] = useState("");
     const [error, setError] = useState("");
 
@@ -21,6 +24,11 @@ export default function RequestAccess() {
         const p = searchParams.get("provider");
         if (e) setEmail(e);
         if (p) setProvider(p);
+
+        // Fetch institutions list
+        axios.get("http://localhost:5000/auth/institutions")
+            .then(res => setInstitutions(res.data))
+            .catch(err => console.error("Error fetching institutions:", err));
     }, [searchParams]);
 
     async function submit(e) {
@@ -30,7 +38,7 @@ export default function RequestAccess() {
 
         try {
             const res = await axios.post("http://localhost:5000/auth/request-access", {
-                email, name, role, department, provider, password
+                email, name, role, department, provider, password, institutionId
             });
             setMsg(res.data.message);
             // Optionally redirect after some time
@@ -103,30 +111,52 @@ export default function RequestAccess() {
                             />
                         </div>
 
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">Select Institution</label>
+                            <select
+                                value={institutionId}
+                                onChange={e => setInstitutionId(e.target.value)}
+                                required
+                                className="input py-3"
+                            >
+                                <option value="">Select Institution</option>
+                                {institutions.map(inst => (
+                                    <option key={inst.id} value={inst.id}>{inst.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">Department</label>
-                                <select
-                                    value={department}
-                                    onChange={e => setDepartment(e.target.value)}
-                                    className="input py-3" // Increased padding for select
-                                >
-                                    <option value="">Select Dept</option>
-                                    <option value="Biomedical Engineering">Biomedical</option>
-                                    <option value="Computer Engineering">Computer</option>
-                                    <option value="Electronics & Communication Engineering">ECE</option>
-                                    <option value="Information Technology">IT</option>
-                                    <option value="Mechanical Engineering">Mechanical</option>
-                                    <option value="Civil Engineering">Civil</option>
-                                    <option value="Electrical Engineering">Electrical</option>
-                                    <option value="General Department">General</option>
-                                </select>
-                            </div>
-                            <div className="space-y-1">
+                            {role !== 'admin' && (
+                                <div className="space-y-1">
+                                    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">Department</label>
+                                    <select
+                                        value={department}
+                                        onChange={e => setDepartment(e.target.value)}
+                                        className="input py-3"
+                                    >
+                                        <option value="">Select Dept</option>
+                                        <option value="Biomedical Engineering">Biomedical</option>
+                                        <option value="Computer Engineering">Computer</option>
+                                        <option value="Electronics & Communication Engineering">ECE</option>
+                                        <option value="Information Technology">IT</option>
+                                        <option value="Mechanical Engineering">Mechanical</option>
+                                        <option value="Civil Engineering">Civil</option>
+                                        <option value="Electrical Engineering">Electrical</option>
+                                        <option value="General Department">General</option>
+                                    </select>
+                                </div>
+                            )}
+                            <div className={`space-y-1 ${role === 'admin' ? 'col-span-2' : ''}`}>
                                 <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">Role</label>
                                 <select
                                     value={role}
-                                    onChange={e => setRole(e.target.value)}
+                                    onChange={e => {
+                                        setRole(e.target.value);
+                                        if (e.target.value === 'admin') {
+                                            setDepartment("");
+                                        }
+                                    }}
                                     className="input py-3"
                                 >
                                     <option value="student">Student</option>

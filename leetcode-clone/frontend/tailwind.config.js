@@ -7,23 +7,23 @@ export default {
     theme: {
         extend: {
             colors: {
-                // Dark Theme Backgrounds
+                // Theme-controlled background levels (bound to CSS variables)
                 background: {
-                    DEFAULT: "#000000",
-                    layer1: "#1e1e1e",
-                    layer2: "#252526",
+                    DEFAULT: "var(--bg-color)",
+                    layer1: "var(--bg-layer1)",
+                    layer2: "var(--bg-layer2)",
                 },
                 // Brand Colors
                 primary: {
-                    DEFAULT: "#3b82f6", // Electric Blue
-                    hover: "#2563eb",
-                    gradientStart: "#3b82f6",
-                    gradientEnd: "#8b5cf6", // Purple
+                    DEFAULT: "var(--primary-color)",
+                    hover: "var(--primary-hover)",
+                    gradientStart: "var(--primary-gradient-start)",
+                    gradientEnd: "var(--primary-gradient-end)",
                 },
-                // Semantic
-                success: "#34d399", // Emerald-400
-                error: "#f87171", // Red-400
-                warning: "#facc15", // Yellow-400
+                // Semantic Colors
+                success: "var(--success-color)",
+                error: "var(--error-color)",
+                warning: "var(--warning-color)",
             },
             fontFamily: {
                 sans: ['Inter', 'Roboto', 'system-ui', 'sans-serif'],

@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Sparkles, ArrowRight, X, Rocket, ChevronDown, Settings, AlertCircle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
-import api, { createFullQuiz, getAiProviders } from "../../utils/api";
+import api, { createFullQuiz, getAcademicCatalog, getAiProviders } from "../../utils/api";
+import { FEATURES } from "../../config/features";
 
 export default function CreateQuiz() {
     const hasValidSupabaseUploadConfig =
@@ -13,9 +14,10 @@ export default function CreateQuiz() {
     // Quiz Metadata
     const [quizDetails, setQuizDetails] = useState({
         title: "",
-        subject: "",
-        department: "",
-        semester: "",
+        subjectId: "",
+        courseOfferingId: "",
+        departmentId: "",
+        semesterId: "",
         duration: "",
         totalMarks: "",
         description: "",
@@ -25,6 +27,8 @@ export default function CreateQuiz() {
     // List of Questions
     const [questions, setQuestions] = useState([]);
     const [submitting, setSubmitting] = useState(false);
+    const [academicCatalog, setAcademicCatalog] = useState({ departments: [], semesters: [], subjects: [], courseOfferings: [] });
+    const [catalogError, setCatalogError] = useState("");
 
     // Current Question Form State
     const [currentQ, setCurrentQ] = useState({
@@ -47,7 +51,31 @@ export default function CreateQuiz() {
 
     const [showAiSidebar, setShowAiSidebar] = useState(false);
 
-    const handleQuizChange = (e) => setQuizDetails({ ...quizDetails, [e.target.name]: e.target.value });
+    useEffect(() => {
+        getAcademicCatalog()
+            .then(({ data }) => setAcademicCatalog(data))
+            .catch((err) => setCatalogError(err.response?.data?.error || "Could not load departments and subjects."));
+    }, []);
+
+    const handleQuizChange = (e) => {
+        const { name, value } = e.target;
+        setQuizDetails((current) => {
+            if (name === "departmentId") {
+                return { ...current, departmentId: value, semesterId: "", subjectId: "" };
+            }
+            if (name === "semesterId") {
+                return { ...current, semesterId: value, subjectId: "" };
+            }
+            return { ...current, [name]: value };
+        });
+    };
+
+    const availableSubjects = academicCatalog.subjects?.filter((subject) =>
+        String(subject.department_id) === String(quizDetails.departmentId) &&
+        String(subject.semester_id) === String(quizDetails.semesterId)
+    ) || [];
+
+    const useNewAcademicModel = FEATURES.NEW_ACADEMIC_MODEL;
 
     // --- Question Form Handlers ---
     const handleQChange = (field, value) => {
@@ -112,9 +140,16 @@ export default function CreateQuiz() {
             return;
         }
         // Validation: All fields required except description
-        if (!quizDetails.title || !quizDetails.subject || !quizDetails.department || !quizDetails.semester || !quizDetails.duration || !quizDetails.totalMarks) {
-            alert("Please fill in all Quiz Details (Title, Subject, Department, Semester, Duration, Total Marks).");
-            return;
+        if (useNewAcademicModel) {
+            if (!quizDetails.title || !quizDetails.courseOfferingId || !quizDetails.duration || !quizDetails.totalMarks) {
+                alert("Please fill in all Quiz Details, including a course offering.");
+                return;
+            }
+        } else {
+            if (!quizDetails.title || !quizDetails.subjectId || !quizDetails.duration || !quizDetails.totalMarks) {
+                alert("Please fill in all Quiz Details, including a subject.");
+                return;
+            }
         }
 
         setSubmitting(true);
@@ -152,7 +187,7 @@ export default function CreateQuiz() {
             alert("Quiz and Questions Created Successfully!");
             // Optional: Redirect or reset
             setQuestions([]);
-            setQuizDetails({ title: "", subject: "", department: "", semester: "", duration: "", totalMarks: "", description: "" });
+            setQuizDetails({ title: "", subjectId: "", courseOfferingId: "", departmentId: "", semesterId: "", duration: "", totalMarks: "", description: "", scheduledAt: "" });
         } catch (error) {
             console.error(error);
             const rawMessage = error.response?.data?.error || error.message;
@@ -206,29 +241,43 @@ export default function CreateQuiz() {
                 <h2 className="text-xl font-semibold mb-4 text-pink-400">1. Quiz Details</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <input name="title" placeholder="Quiz Title" value={quizDetails.title} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white" />
-                    <input name="subject" placeholder="Subject" value={quizDetails.subject} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white" />
+                    {useNewAcademicModel ? (
+                        <select name="courseOfferingId" value={quizDetails.courseOfferingId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white col-span-1 md:col-span-2">
+                            <option value="">Select Course Offering</option>
+                            {academicCatalog.courseOfferings?.map((co) => (
+                                <option key={co.id} value={co.id}>
+                                    {co.subject_code ? `${co.subject_code} — ` : ""}{co.subject_name} ({co.term_type} {co.term_number}, {co.program_name})
+                                </option>
+                            ))}
+                        </select>
+                    ) : (
+                        <>
+                            <select name="departmentId" value={quizDetails.departmentId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white">
+                                <option value="">Select Department</option>
+                                {academicCatalog.departments?.map((department) => (
+                                    <option key={department.id} value={department.id}>
+                                        {department.code} — {department.name}
+                                    </option>
+                                ))}
+                            </select>
 
-                    <select name="department" value={quizDetails.department} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white">
-                        <option value="">Select Department</option>
-                        <option value="CS">Computer Science</option>
-                        <option value="IT">Information Technology</option>
-                        <option value="ECE">Electronics & Communication</option>
-                        <option value="EE">Electrical Engineering</option>
-                        <option value="ME">Mechanical Engineering</option>
-                        <option value="CE">Civil Engineering</option>
-                    </select>
+                            <select name="semesterId" value={quizDetails.semesterId} onChange={handleQuizChange} disabled={!quizDetails.departmentId} className="input bg-[#252526] border-gray-700 text-white disabled:opacity-50">
+                                <option value="">Select Semester</option>
+                                {academicCatalog.semesters?.map((semester) => (
+                                    <option key={semester.id} value={semester.id}>Semester {semester.semester_no}</option>
+                                ))}
+                            </select>
 
-                    <select name="semester" value={quizDetails.semester} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white">
-                        <option value="">Select Semester</option>
-                        <option value="1st">1st Semester</option>
-                        <option value="2nd">2nd Semester</option>
-                        <option value="3rd">3rd Semester</option>
-                        <option value="4th">4th Semester</option>
-                        <option value="5th">5th Semester</option>
-                        <option value="6th">6th Semester</option>
-                        <option value="7th">7th Semester</option>
-                        <option value="8th">8th Semester</option>
-                    </select>
+                            <select name="subjectId" value={quizDetails.subjectId} onChange={handleQuizChange} disabled={!quizDetails.semesterId} className="input bg-[#252526] border-gray-700 text-white disabled:opacity-50">
+                                <option value="">Select Subject</option>
+                                {availableSubjects.map((subject) => (
+                                    <option key={subject.id} value={subject.id}>
+                                        {subject.code ? `${subject.code} — ` : ""}{subject.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </>
+                    )}
 
                     <input name="duration" placeholder="Duration (mins)" type="number" value={quizDetails.duration} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white" />
                     <input name="totalMarks" type="number" placeholder="Total Marks" value={quizDetails.totalMarks} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white" />
@@ -247,6 +296,7 @@ export default function CreateQuiz() {
                     </div>
                     <textarea name="description" placeholder="Description" value={quizDetails.description} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white col-span-2 h-20" />
                 </div>
+                {catalogError && <p className="mt-3 text-sm text-red-400">{catalogError}</p>}
             </div>
 
             {/* Add Question Section */}
@@ -419,6 +469,7 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
     const [loading, setLoading] = useState(false);
     const [generatedQuestions, setGeneratedQuestions] = useState([]);
     const [expandedQ, setExpandedQ] = useState(null);
+    const [generateError, setGenerateError] = useState(null);
 
     // Provider state
     const [providers, setProviders] = useState([]);
@@ -454,6 +505,7 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
     const handleGenerate = async () => {
         if (!prompt.trim() || !isConfigured) return;
         setLoading(true);
+        setGenerateError(null);
         try {
             const res = await api.post("/api/teacher/ai/generate", {
                 prompt,
@@ -464,7 +516,13 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
             setExpandedQ(null);
         } catch (err) {
             console.error(err);
-            alert("AI Generation failed: " + (err.response?.data?.error || err.message));
+            const status = err.response?.status;
+            const msg = err.response?.data?.error || err.message;
+            if (status === 429) {
+                setGenerateError("⏳ Rate limit reached — " + msg);
+            } else {
+                setGenerateError("❌ " + msg);
+            }
         } finally {
             setLoading(false);
         }
@@ -551,6 +609,14 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
                                         {loading ? "Generating..." : `Generate with ${currentProvider?.name || selectedProvider}`}
                                     </button>
                                 </div>
+
+                                {/* Inline Error Banner */}
+                                {generateError && (
+                                    <div className="mb-3 p-3 rounded-lg bg-red-950/60 border border-red-700/50 text-red-300 text-xs leading-relaxed">
+                                        {generateError}
+                                        <button onClick={() => setGenerateError(null)} className="ml-2 text-red-400 hover:text-white font-bold">✕</button>
+                                    </div>
+                                )}
 
                                 {/* Generated Questions */}
                                 <div className="space-y-4">

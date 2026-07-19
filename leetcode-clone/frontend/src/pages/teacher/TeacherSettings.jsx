@@ -27,6 +27,24 @@ const PROVIDER_ICONS = {
             <rect width="24" height="24" rx="4" fill="#f87315"/>
             <path d="M7 17V7l5 5 5-5v10" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
+    ),
+    openai: (
+        <svg viewBox="0 0 24 24" className="w-6 h-6" fill="white">
+            <rect width="24" height="24" rx="4" fill="#10a37f"/>
+            <path d="M12 4.5a7.1 7.1 0 0 0-6.8 9.2L4 17l3.4-1.1A7.1 7.1 0 1 0 12 4.5z" fill="white" opacity="0.9"/>
+        </svg>
+    ),
+    claude: (
+        <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none">
+            <rect width="24" height="24" rx="4" fill="#c9a96e"/>
+            <text x="4" y="17" fontSize="13" fontWeight="bold" fill="white" fontFamily="serif">Cl</text>
+        </svg>
+    ),
+    grok: (
+        <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none">
+            <rect width="24" height="24" rx="4" fill="#000"/>
+            <path d="M6 6l12 12M18 6L6 18" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+        </svg>
     )
 };
 
@@ -71,6 +89,38 @@ const SETUP_GUIDES = {
             "Click 'Create new key'",
             "Copy the key to your clipboard",
             "Paste it below"
+        ]
+    },
+    openai: {
+        title: "How to get an OpenAI API Key",
+        steps: [
+            "Go to platform.openai.com and sign in",
+            "Click your profile icon → 'API keys'",
+            "Click 'Create new secret key'",
+            "Give it a name (e.g. 'Quiz Portal')",
+            "Copy the key immediately — it won't be shown again",
+            "Make sure your account has credits at platform.openai.com/settings/billing"
+        ]
+    },
+    claude: {
+        title: "How to get a Claude (Anthropic) API Key",
+        steps: [
+            "Go to console.anthropic.com and create an account",
+            "Navigate to Settings → API Keys",
+            "Click 'Create Key'",
+            "Give it a name and click 'Create Key'",
+            "Copy the key — it won't be shown again",
+            "Add credits at console.anthropic.com/settings/billing if needed"
+        ]
+    },
+    grok: {
+        title: "How to get a Grok (xAI) API Key",
+        steps: [
+            "Go to console.x.ai and sign in with your X (Twitter) account",
+            "Navigate to API Keys",
+            "Click 'Create API Key'",
+            "Copy the key immediately",
+            "Note: Grok API has a free monthly credit allowance"
         ]
     }
 };

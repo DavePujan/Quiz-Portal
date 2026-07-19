@@ -7,7 +7,7 @@ import { AuthContext } from "./context/authStore";
 import { useContext, useState } from "react";
 import { Toaster } from "react-hot-toast";
 import "./styles/common.css";
-import { Menu, X } from "lucide-react";
+import { Menu, X, Sun, Moon } from "lucide-react";
 
 import RequestAccess from "./auth/RequestAccess";
 import ForgotPassword from "./auth/ForgotPassword";
@@ -41,10 +41,16 @@ import AuditLogs from "./pages/admin/AuditLogs";
 import AdminSettings from "./pages/admin/AdminSettings";
 import AdminRequests from "./pages/admin/AdminRequests";
 
+// Master Admin Pages
+import MasterDashboard from "./pages/master/MasterDashboard";
+import LandingPage from "./pages/LandingPage";
+import PrivacyPage from "./pages/PrivacyPage";
+import TermsPage from "./pages/TermsPage";
+
 // NavBar is now only for Student and Public pages. 
 // Teacher/Admin navigation is handled by Sidebar in DashboardLayout.
 function NavBar() {
-  const { token, logout, role } = useContext(AuthContext);
+  const { token, logout, role, profile, theme, toggleTheme } = useContext(AuthContext);
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -56,7 +62,8 @@ function NavBar() {
     location.pathname.includes("/student/quiz/") ||
     location.pathname === "/request-access" ||
     location.pathname === "/login" ||
-    location.pathname === "/maintenance"
+    location.pathname === "/maintenance" ||
+    location.pathname === "/"
   ) return null;
 
   return (
@@ -81,6 +88,22 @@ function NavBar() {
         </div>
 
         <div className="flex items-center gap-4">
+          {profile && (
+            <div className="hidden md:flex flex-col text-right border-r border-gray-800 pr-4">
+              <span className="text-sm font-semibold text-white leading-tight">{profile.name}</span>
+              <span className="text-[10px] text-gray-400 mt-0.5 leading-none">
+                {profile.college} &bull; <span className="text-primary">{profile.department}</span>
+              </span>
+            </div>
+          )}
+          <button
+            onClick={toggleTheme}
+            className="px-3 py-2 text-sm text-gray-400 hover:bg-white/5 hover:text-white rounded-lg border border-gray-800 transition-colors flex items-center justify-center"
+            title="Toggle theme"
+          >
+            {theme === "light" ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          
           {/* Desktop Logout */}
           <div className="hidden md:block">
             {token ? (
@@ -126,6 +149,8 @@ function NavBar() {
   );
 }
 
+
+
 export default function App() {
   return (
     <AuthProvider>
@@ -141,7 +166,9 @@ export default function App() {
 
           {/* Student / Public */}
           {/* Student / Public */}
-          <Route path="/" element={<Login />} />
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
           
           <Route
             path="/student/dashboard"
@@ -235,6 +262,9 @@ export default function App() {
           <Route path="/admin/users" element={<ProtectedRoute role="admin"><DashboardLayout><UserManagement /></DashboardLayout></ProtectedRoute>} />
           <Route path="/admin/logs" element={<ProtectedRoute role="admin"><DashboardLayout><AuditLogs /></DashboardLayout></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute role="admin"><DashboardLayout><AdminSettings /></DashboardLayout></ProtectedRoute>} />
+          
+          {/* Master Admin Routes */}
+          <Route path="/master" element={<ProtectedRoute role="master_admin"><DashboardLayout><MasterDashboard /></DashboardLayout></ProtectedRoute>} />
 
         </Routes>
       </BrowserRouter>

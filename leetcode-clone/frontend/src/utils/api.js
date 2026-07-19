@@ -63,6 +63,7 @@ export const getSettings = () => api.get("/api/admin/settings");
 export const updateSettings = (settings) => api.post("/api/admin/settings", settings);
 
 export const createFullQuiz = (data) => api.post("/api/teacher/quiz/full", data);
+export const getAcademicCatalog = () => api.get("/api/teacher/academics");
 
 export const deleteUser = (email) => api.delete("/api/admin/user", { data: { email } });
 
@@ -75,5 +76,18 @@ export const exportTeacherQuizAnalytics = (quizId) => api.get(`/api/analytics/te
 export const getAiProviders = () => api.get("/api/teacher/settings/ai-providers");
 export const saveAiKey = (provider, apiKey) => api.post("/api/teacher/settings/ai-key", { provider, apiKey });
 export const removeAiKey = (provider) => api.delete("/api/teacher/settings/ai-key", { data: { provider } });
+
+// Master Admin Endpoints
+export const getMasterStats = () => api.get("/api/master/stats");
+export const getMasterInstitutes = () => api.get("/api/master/institutes");
+export const createInstitute = (data) => api.post("/api/master/institutes", data);
+export const getMasterAdmins = () => api.get("/api/master/admins");
+export const assignAdmin = (data) => api.post("/api/master/admins", data);
+export const removeAdmin = (membershipId) => api.delete(`/api/master/admins/${membershipId}`);
+export const getMasterSettings = () => api.get("/api/master/settings");
+export const updateMasterSettings = (settings) => api.post("/api/master/settings", settings);
+export const getMasterRequests = () => api.get("/api/master/requests");
+export const approveMasterRequest = (email) => api.post("/api/master/requests/approve", { email });
+export const rejectMasterRequest = (email) => api.post("/api/master/requests/reject", { email });
 
 export default api;
