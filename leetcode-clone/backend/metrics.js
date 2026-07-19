@@ -21,4 +21,10 @@ const fallbackCounter = new client.Counter({
     help: "Number of times the Graceful circuit breaker bypassed Redis",
 });
 
-module.exports = { client, httpRequests, redisStatus, fallbackCounter };
+const quizCreationMigration = new client.Counter({
+    name: "quiz_creation_migration_total",
+    help: "Total quiz creations tracked during rollout",
+    labelNames: ["mode", "schemaVersion"],
+});
+
+module.exports = { client, httpRequests, redisStatus, fallbackCounter, quizCreationMigration };

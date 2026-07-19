@@ -1,22 +1,21 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const OpenAI = require("openai");
 const Cerebras = require("@cerebras/cerebras_cloud_sdk");
+const Anthropic = require("@anthropic-ai/sdk");
 
 // ─── Provider Registry ───────────────────────────────────────────────
-const ALLOWED_PROVIDERS = ["gemini", "openrouter", "cerebras", "mistral"];
+const ALLOWED_PROVIDERS = ["gemini", "openrouter", "cerebras", "mistral", "openai", "claude", "grok"];
 
-const PROVIDER_KEY_COLUMNS = {
-    gemini: "gemini_api_key",
-    openrouter: "openrouter_api_key",
-    cerebras: "cerebras_api_key",
-    mistral: "mistral_api_key"
-};
+// NOTE: API keys are stored in user_api_keys table (normalized), NOT in profiles columns.
 
 const DEFAULT_MODELS = {
     gemini: "gemini-2.5-flash",
     openrouter: "google/gemma-4-31b-it:free",
     cerebras: "gpt-oss-120b",
-    mistral: "mistral-small-latest"
+    mistral: "mistral-small-latest",
+    openai: "gpt-4o-mini",
+    claude: "claude-3-5-haiku-20241022",
+    grok: "grok-3-mini"
 };
 
 // ─── Provider Implementations ────────────────────────────────────────
@@ -75,21 +74,35 @@ async function generateOpenRouterResponse(prompt, apiKey, { isJson = true, model
 
     const selectedModel = model || DEFAULT_MODELS.openrouter;
     console.log("[OpenRouter] Sending request to model:", selectedModel);
-    const completion = await client.chat.completions.create({
-        model: selectedModel,
-        messages,
-        temperature: 0.7,
-        max_tokens: 4096
-    });
 
-    console.log("[OpenRouter] Response received. choices:", completion?.choices?.length ?? "MISSING");
+    try {
+        const completion = await client.chat.completions.create({
+            model: selectedModel,
+            messages,
+            temperature: 0.7,
+            max_tokens: 4096
+        });
 
-    if (!completion?.choices || completion.choices.length === 0) {
-        console.error("[OpenRouter] Unexpected response shape:", JSON.stringify(completion).substring(0, 500));
-        throw new Error("OpenRouter returned an empty or invalid response. The free model may be overloaded — try again.");
+        console.log("[OpenRouter] Response received. choices:", completion?.choices?.length ?? "MISSING");
+
+        if (!completion?.choices || completion.choices.length === 0) {
+            console.error("[OpenRouter] Unexpected response shape:", JSON.stringify(completion).substring(0, 500));
+            throw new Error("OpenRouter returned an empty or invalid response. The free model may be overloaded — try again.");
+        }
+
+        return completion.choices[0]?.message?.content || "";
+    } catch (err) {
+        const status = err?.status || err?.response?.status;
+        const msg = err?.message || String(err);
+
+        if (status === 429 || msg.includes("429") || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("too many requests")) {
+            throw new Error("RATE_LIMIT: OpenRouter free tier rate limit hit. Please wait 10–30 seconds and try again, or switch to a paid model.");
+        }
+        if (status === 402 || msg.toLowerCase().includes("payment") || msg.toLowerCase().includes("credits")) {
+            throw new Error("RATE_LIMIT: OpenRouter account has insufficient credits. Please top up or use a free model.");
+        }
+        throw err;
     }
-
-    return completion.choices[0]?.message?.content || "";
 }
 
 async function generateCerebrasResponse(prompt, apiKey, { isJson = true, model } = {}) {
@@ -127,7 +140,12 @@ async function generateCerebrasResponse(prompt, apiKey, { isJson = true, model }
 
         return completion.choices[0]?.message?.content || "";
     } catch (err) {
-        console.error("[Cerebras] API Error:", err.message);
+        const status = err?.status || err?.response?.status;
+        const msg = err?.message || String(err);
+        if (status === 429 || msg.includes("429") || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("too many requests")) {
+            throw new Error("RATE_LIMIT: Cerebras rate limit reached. Please wait a moment and try again.");
+        }
+        console.error("[Cerebras] API Error:", msg);
         throw err;
     }
 }
@@ -167,7 +185,12 @@ async function generateMistralResponse(prompt, apiKey, { isJson = true, model } 
 
         return response.choices[0]?.message?.content || "";
     } catch (err) {
-        console.error("[Mistral] API Error:", err.message);
+        const status = err?.status || err?.httpStatus || err?.response?.status;
+        const msg = err?.message || String(err);
+        if (status === 429 || msg.includes("429") || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("too many requests")) {
+            throw new Error("RATE_LIMIT: Mistral rate limit reached. Please wait a moment and try again.");
+        }
+        console.error("[Mistral] API Error:", msg);
         throw err;
     }
 }
@@ -177,8 +200,142 @@ const providers = {
     gemini: generateGeminiResponse,
     openrouter: generateOpenRouterResponse,
     cerebras: generateCerebrasResponse,
-    mistral: generateMistralResponse
+    mistral: generateMistralResponse,
+    openai: generateOpenAIResponse,
+    claude: generateClaudeResponse,
+    grok: generateGrokResponse
 };
+
+// ─── OpenAI (GPT) ────────────────────────────────────────────────────
+async function generateOpenAIResponse(prompt, apiKey, { isJson = true, model } = {}) {
+    if (!apiKey) throw new Error("OpenAI API Key is required.");
+
+    const client = new OpenAI.default({ apiKey });
+    const selectedModel = model || DEFAULT_MODELS.openai;
+    console.log("[OpenAI] Sending request to model:", selectedModel);
+
+    const messages = [{ role: "user", content: prompt }];
+    if (isJson) {
+        messages.unshift({
+            role: "system",
+            content: "You are a helpful assistant. Always respond with valid JSON only. No markdown fences, no extra text."
+        });
+    }
+
+    try {
+        const completion = await client.chat.completions.create({
+            model: selectedModel,
+            messages,
+            temperature: 0.7,
+            max_tokens: 4096,
+            ...(isJson ? { response_format: { type: "json_object" } } : {})
+        });
+
+        console.log("[OpenAI] Response received. choices:", completion?.choices?.length ?? "MISSING");
+
+        if (!completion?.choices || completion.choices.length === 0) {
+            throw new Error("OpenAI returned an empty response.");
+        }
+        return completion.choices[0]?.message?.content || "";
+    } catch (err) {
+        const status = err?.status || err?.response?.status;
+        const msg = err?.message || String(err);
+        if (status === 429 || msg.includes("429") || msg.toLowerCase().includes("rate limit")) {
+            throw new Error("RATE_LIMIT: OpenAI rate limit or quota exceeded. Check your usage at platform.openai.com.");
+        }
+        if (status === 401 || msg.toLowerCase().includes("invalid api key")) {
+            throw new Error("Invalid OpenAI API key. Please update it in Settings.");
+        }
+        console.error("[OpenAI] API Error:", msg);
+        throw err;
+    }
+}
+
+// ─── Claude (Anthropic) ───────────────────────────────────────────────
+async function generateClaudeResponse(prompt, apiKey, { isJson = true, model } = {}) {
+    if (!apiKey) throw new Error("Anthropic (Claude) API Key is required.");
+
+    const client = new Anthropic.default({ apiKey });
+    const selectedModel = model || DEFAULT_MODELS.claude;
+    console.log("[Claude] Sending request to model:", selectedModel);
+
+    const systemPrompt = isJson
+        ? "You are a helpful assistant. Always respond with valid JSON only. No markdown fences, no extra text."
+        : "You are a helpful assistant.";
+
+    try {
+        const response = await client.messages.create({
+            model: selectedModel,
+            max_tokens: 4096,
+            system: systemPrompt,
+            messages: [{ role: "user", content: prompt }]
+        });
+
+        console.log("[Claude] Response received. stop_reason:", response?.stop_reason);
+
+        const content = response?.content?.[0]?.text;
+        if (!content) throw new Error("Claude returned an empty response.");
+        return content;
+    } catch (err) {
+        const status = err?.status || err?.error?.type;
+        const msg = err?.message || String(err);
+        if (status === 429 || msg.includes("429") || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("overloaded")) {
+            throw new Error("RATE_LIMIT: Claude is overloaded or rate limit reached. Please wait and try again.");
+        }
+        if (status === 401 || msg.toLowerCase().includes("authentication")) {
+            throw new Error("Invalid Claude API key. Please update it in Settings.");
+        }
+        console.error("[Claude] API Error:", msg);
+        throw err;
+    }
+}
+
+// ─── Grok (xAI — OpenAI-compatible API) ──────────────────────────────
+async function generateGrokResponse(prompt, apiKey, { isJson = true, model } = {}) {
+    if (!apiKey) throw new Error("xAI Grok API Key is required.");
+
+    const client = new OpenAI.default({
+        apiKey,
+        baseURL: "https://api.x.ai/v1"
+    });
+    const selectedModel = model || DEFAULT_MODELS.grok;
+    console.log("[Grok] Sending request to model:", selectedModel);
+
+    const messages = [{ role: "user", content: prompt }];
+    if (isJson) {
+        messages.unshift({
+            role: "system",
+            content: "You are a helpful assistant. Always respond with valid JSON only. No markdown fences, no extra text."
+        });
+    }
+
+    try {
+        const completion = await client.chat.completions.create({
+            model: selectedModel,
+            messages,
+            temperature: 0.7,
+            max_tokens: 4096
+        });
+
+        console.log("[Grok] Response received. choices:", completion?.choices?.length ?? "MISSING");
+
+        if (!completion?.choices || completion.choices.length === 0) {
+            throw new Error("Grok returned an empty response.");
+        }
+        return completion.choices[0]?.message?.content || "";
+    } catch (err) {
+        const status = err?.status || err?.response?.status;
+        const msg = err?.message || String(err);
+        if (status === 429 || msg.includes("429") || msg.toLowerCase().includes("rate limit")) {
+            throw new Error("RATE_LIMIT: Grok rate limit reached. Please wait a moment and try again.");
+        }
+        if (status === 401 || msg.toLowerCase().includes("invalid") || msg.toLowerCase().includes("unauthorized")) {
+            throw new Error("Invalid Grok API key. Please update it in Settings.");
+        }
+        console.error("[Grok] API Error:", msg);
+        throw err;
+    }
+}
 
 // ─── Shared Utilities ────────────────────────────────────────────────
 
@@ -211,11 +368,17 @@ function normalizeQuizResponse(raw) {
     // Direct array
     if (Array.isArray(parsed)) return parsed;
 
-    // Wrapped in { questions: [...] }
-    if (parsed.questions && Array.isArray(parsed.questions)) return parsed.questions;
+    // Common named wrappers: { questions, data, results, items, quiz, mcqs, problems }
+    const KNOWN_KEYS = ["questions", "data", "results", "items", "quiz", "mcqs", "problems", "quizQuestions", "quiz_questions"];
+    for (const key of KNOWN_KEYS) {
+        if (parsed[key] && Array.isArray(parsed[key]) && parsed[key].length > 0) {
+            return parsed[key];
+        }
+    }
 
-    // Wrapped in { data: [...] }
-    if (parsed.data && Array.isArray(parsed.data)) return parsed.data;
+    // Last resort: find the first array-valued key in the object
+    const arrayEntry = Object.values(parsed).find(v => Array.isArray(v) && v.length > 0);
+    if (arrayEntry) return arrayEntry;
 
     throw new Error("AI response is valid JSON but not in expected format (array or {questions: []}).");
 }
@@ -223,7 +386,6 @@ function normalizeQuizResponse(raw) {
 // ─── Exported Functions ──────────────────────────────────────────────
 
 exports.ALLOWED_PROVIDERS = ALLOWED_PROVIDERS;
-exports.PROVIDER_KEY_COLUMNS = PROVIDER_KEY_COLUMNS;
 exports.DEFAULT_MODELS = DEFAULT_MODELS;
 
 exports.generateQuiz = async ({ prompt, apiKey, provider = "gemini", model }) => {

@@ -90,6 +90,7 @@ app.use((req, res, next) => {
 app.use("/api/teacher", auth, authorize('teacher'), teacherRoutes);
 app.use("/api/student", studentRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/master", auth, authorize('master_admin'), require("./routes/master"));
 app.use("/api/analytics", require("./routes/analytics"));
 app.use("/api", submitRoutes);
 app.use("/api/job", require("./routes/job"));

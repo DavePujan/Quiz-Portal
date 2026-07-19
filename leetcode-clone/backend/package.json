@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "concurrently \"nodemon server.js\" \"node workers/submission.worker.js\"",
+    "dev": "concurrently \"nodemon server.js\" \"node workers/submission.worker.js\" \"node workers/audit.worker.js\"",
     "infra:up": "docker compose -f docker-compose.dev.yml up -d redis prometheus grafana && (docker start judge0-official-db-1 judge0-official-redis-1 judge0-official-server-1 judge0-official-worker-1 || echo judge0-official containers not found)",
     "infra:down": "docker compose -f docker-compose.dev.yml down && (docker stop judge0-official-worker-1 judge0-official-server-1 judge0-official-db-1 judge0-official-redis-1 || echo judge0-official containers already stopped)",
     "test:runner": "node ../tests-scripts/backend-test.js",
@@ -16,6 +16,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.0",
     "@cerebras/cerebras_cloud_sdk": "^1.64.1",
     "@google/generative-ai": "^0.24.1",
     "@mistralai/mistralai": "^2.3.0",
