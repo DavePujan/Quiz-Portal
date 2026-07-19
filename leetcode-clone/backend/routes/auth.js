@@ -66,7 +66,7 @@ const { createClient } = require("@supabase/supabase-js");
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 router.post("/request-access", async (req, res) => {
-    const { email, role, name, provider, department } = req.body;
+    const { email, role, name, provider, department, institutionId } = req.body;
 
     try {
         // 0. Check Settings
@@ -118,7 +118,8 @@ router.post("/request-access", async (req, res) => {
             department: department || null,
             provider: provider || "local",
             password: hashedPassword, // Store hashed password
-            status: "pending"
+            status: "pending",
+            institution_id: institutionId || null
         });
 
         if (error) throw error;
@@ -126,6 +127,18 @@ router.post("/request-access", async (req, res) => {
         res.json({ message: "Access request submitted. Please wait for admin approval." });
     } catch (err) {
         console.error("Request Access Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /institutions - Public list of registered institutions for the signup dropdown
+router.get("/institutions", async (req, res) => {
+    try {
+        const pool = require("../db");
+        const result = await pool.query("SELECT id, name FROM institutions ORDER BY name");
+        res.json(result.rows);
+    } catch (err) {
+        console.error("Public Fetch Institutions Error:", err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -240,6 +253,55 @@ router.post("/logout", async (req, res) => {
     res.cookie("refreshToken", "", cookieOptions);
 
     res.json({ message: "Logged out successfully" });
+});
+
+// GET /auth/profile - Fetch logged-in user profile, college, and department
+router.get("/profile", async (req, res) => {
+    const token = req.cookies.accessToken || req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+
+    try {
+        const u = jwt.verify(token, process.env.JWT_SECRET || "jwtsecret123");
+        
+        // Fetch profile
+        const { data: profile, error } = await supabase
+            .from("profiles")
+            .select("id, email, full_name, role, department")
+            .eq("email", u.email)
+            .single();
+
+        if (error || !profile) {
+            return res.status(404).json({ error: "Profile not found" });
+        }
+
+        // Query active institution membership and department
+        const pool = require("../db");
+        const orgResult = await pool.query(`
+            SELECT 
+                i.name as institution_name,
+                d.name as department_name
+            FROM institution_memberships im
+            LEFT JOIN institutions i ON i.id = im.institution_id
+            LEFT JOIN departments d ON d.id = im.department_id
+            WHERE im.user_id = $1 AND im.is_active = true
+            LIMIT 1
+        `, [profile.id]);
+
+        const college = orgResult.rows[0]?.institution_name || "QuizPortal Institute";
+        const department = orgResult.rows[0]?.department_name || profile.department || "General";
+
+        res.json({
+            id: profile.id,
+            email: profile.email,
+            name: profile.full_name || profile.email.split("@")[0],
+            role: profile.role,
+            college: college,
+            department: department
+        });
+    } catch (err) {
+        console.error("Fetch profile error:", err);
+        res.status(401).json({ error: "Invalid or expired token" });
+    }
 });
 
 module.exports = router;

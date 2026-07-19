@@ -3,9 +3,17 @@ const { createClient } = require("@supabase/supabase-js");
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const { auth, authorize } = require("../middleware/auth");
+const { requireInstitutionContext } = require("../middleware/institution");
+const { buildWrappedCode } = require("../utils/codeExecution");
+const { FEATURES } = require("../config/features");
+const { quizCreationMigration } = require("../metrics");
+const { auditQueue } = require("../queues/auditQueue");
 const { aiLimiter } = require("../middleware/rateLimiter");
 const pool = require("../db");
-const { buildWrappedCode } = require("../utils/codeExecution");
+const redisClient = require("../config/redis");
+const judge0 = require("../utils/judge0");
+const ai = require("../utils/ai");
+const { generateTopic } = require("../utils/dynamicTopicGenerator");
 
 // Mock database for problems
 // In reality, this should be in models/questions.js or independent db
@@ -15,12 +23,207 @@ const { buildWrappedCode } = require("../utils/codeExecution");
 const Quiz = require("../models/Quiz");
 const Evaluation = require("../models/Evaluation");
 
-async function ensureProfileEnrollmentColumn() {
+const AI_PROVIDER_METADATA = {
+    gemini: {
+        id: "gemini",
+        name: "Gemini",
+        description: "Google's Gemini AI. Fast and reliable for quiz generation.",
+        docsUrl: "https://aistudio.google.com/apikey"
+    },
+    openrouter: {
+        id: "openrouter",
+        name: "OpenRouter",
+        description: "Access 100+ models including free ones like Google Gemma 4.",
+        docsUrl: "https://openrouter.ai/settings/keys"
+    },
+    cerebras: {
+        id: "cerebras",
+        name: "Cerebras",
+        description: "High-performance inference for enterprise workloads.",
+        docsUrl: "https://cloud.cerebras.ai/"
+    },
+    mistral: {
+        id: "mistral",
+        name: "Mistral",
+        description: "Frontier open models from Mistral AI.",
+        docsUrl: "https://console.mistral.ai/api-keys/"
+    },
+    openai: {
+        id: "openai",
+        name: "OpenAI",
+        description: "GPT-4o and GPT-4o-mini — industry-leading models from OpenAI.",
+        docsUrl: "https://platform.openai.com/api-keys"
+    },
+    claude: {
+        id: "claude",
+        name: "Claude",
+        description: "Anthropic's Claude — excellent reasoning and instruction-following.",
+        docsUrl: "https://console.anthropic.com/settings/keys"
+    },
+    grok: {
+        id: "grok",
+        name: "Grok",
+        description: "xAI's Grok — fast reasoning model with real-time knowledge.",
+        docsUrl: "https://console.x.ai/"
+    }
+};
+
+async function ensureProviderRegistry() {
     await pool.query(`
-        ALTER TABLE profiles
-        ADD COLUMN IF NOT EXISTS enrollment_no TEXT;
+        INSERT INTO providers (code, name)
+        VALUES
+            ('gemini', 'Gemini'),
+            ('openrouter', 'OpenRouter'),
+            ('cerebras', 'Cerebras'),
+            ('mistral', 'Mistral'),
+            ('openai', 'OpenAI'),
+            ('claude', 'Claude'),
+            ('grok', 'Grok')
+        ON CONFLICT (code) DO NOTHING;
     `);
 }
+
+async function getProfileIdByEmail(email) {
+    const result = await pool.query(
+        `SELECT id FROM profiles WHERE lower(email) = lower($1) LIMIT 1`,
+        [email]
+    );
+    return result.rows[0]?.id || null;
+}
+
+async function getProviderId(providerCode) {
+    await ensureProviderRegistry();
+    const result = await pool.query(
+        `SELECT id FROM providers WHERE code = $1 LIMIT 1`,
+        [providerCode]
+    );
+    return result.rows[0]?.id || null;
+}
+
+async function getApiKeyForTeacher(email, providerCode) {
+    const result = await pool.query(
+        `
+        SELECT uk.encrypted_api_key
+        FROM profiles p
+        JOIN user_api_keys uk ON uk.user_id = p.id
+        JOIN providers pr ON pr.id = uk.provider_id
+        WHERE lower(p.email) = lower($1)
+          AND pr.code = $2
+        ORDER BY uk.updated_at DESC
+        LIMIT 1
+        `,
+        [email, providerCode]
+    );
+    return result.rows[0]?.encrypted_api_key || null;
+}
+
+async function upsertTeacherApiKey(email, providerCode, apiKey) {
+    const userId = await getProfileIdByEmail(email);
+    const providerId = await getProviderId(providerCode);
+    if (!userId) throw new Error("Profile not found");
+    if (!providerId) throw new Error(`Unknown provider: ${providerCode}`);
+
+    await pool.query(
+        `
+        INSERT INTO user_api_keys (user_id, provider_id, encrypted_api_key)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id, provider_id) DO UPDATE
+          SET encrypted_api_key = EXCLUDED.encrypted_api_key,
+              updated_at = NOW()
+        `,
+        [userId, providerId, apiKey]
+    );
+}
+
+async function deleteTeacherApiKey(email, providerCode) {
+    const userId = await getProfileIdByEmail(email);
+    const providerId = await getProviderId(providerCode);
+    if (!userId || !providerId) return;
+
+    await pool.query(
+        `DELETE FROM user_api_keys WHERE user_id = $1 AND provider_id = $2`,
+        [userId, providerId]
+    );
+}
+
+// Academic catalog used by the normalized quiz-creation form.
+router.get("/academics", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
+    try {
+        const userId = req.context.userId;
+        const cacheKey = `academic_catalog:teacher:${userId}`;
+        
+        if (redisClient.isAvailable) {
+            const cached = await redisClient.get(cacheKey);
+            if (cached) {
+                console.log(`[Cache Hit] /academics for user ${userId}`);
+                return res.json(JSON.parse(cached));
+            }
+        }
+
+        let responseData = {};
+
+        if (FEATURES.NEW_ACADEMIC_MODEL) {
+            // Fetch course offerings for this teacher
+            const courseOfferingsResult = await pool.query(`
+                SELECT 
+                    co.id, 
+                    s.name as subject_name, 
+                    s.code as subject_code,
+                    at.term_number,
+                    at.term_type,
+                    p.name as program_name,
+                    d.name as department_name,
+                    co.institution_id
+                FROM course_offerings co
+                JOIN subjects s ON s.id = co.subject_id
+                JOIN academic_terms at ON at.id = co.academic_term_id
+                JOIN programs p ON p.id = at.program_id
+                LEFT JOIN departments d ON d.id = p.department_id
+                WHERE co.teacher_id = $1
+                ORDER BY s.name
+            `, [userId]);
+            
+            responseData = {
+                courseOfferings: courseOfferingsResult.rows || [],
+                departments: [],
+                semesters: [],
+                subjects: []
+            };
+        } else {
+            const [departmentsResult, semestersResult, subjectsResult] = await Promise.all([
+                pool.query(`SELECT id, code, name FROM departments ORDER BY code NULLS LAST, name`),
+                pool.query(`
+                    SELECT at.id, at.term_number AS semester_no, at.term_type, at.program_id, p.department_id
+                    FROM academic_terms at
+                    JOIN programs p ON p.id = at.program_id
+                    ORDER BY at.term_number, at.id
+                `),
+                pool.query(`
+                    SELECT s.id, s.code, s.name, p.department_id, s.academic_term_id AS semester_id, s.program_id, s.institution_id
+                    FROM subjects s
+                    JOIN programs p ON p.id = s.program_id
+                    ORDER BY s.name
+                `)
+            ]);
+
+            responseData = {
+                courseOfferings: [],
+                departments: departmentsResult.rows || [],
+                semesters: semestersResult.rows || [],
+                subjects: subjectsResult.rows || []
+            };
+        }
+
+        if (redisClient.isAvailable) {
+            await redisClient.set(cacheKey, JSON.stringify(responseData), 'EX', 300); // 5 minutes TTL
+        }
+
+        return res.json(responseData);
+    } catch (err) {
+        console.error("Get academic catalog error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
 
 async function ensureQuestionFunctionNameColumn() {
     await pool.query(`
@@ -29,45 +232,85 @@ async function ensureQuestionFunctionNameColumn() {
     `);
 }
 
+async function ensureProfileEnrollmentColumn() {
+    await pool.query(`
+        ALTER TABLE profiles
+        ADD COLUMN IF NOT EXISTS enrollment_no TEXT;
+    `);
+}
+
 // Dashboard Stats
-router.get("/dashboard", auth, authorize('teacher'), async (req, res) => {
+router.get("/dashboard", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
     try {
+        const userId = req.context.userId;
+
+        // Fetch institution and department names
+        const orgResult = await pool.query(`
+            SELECT 
+                i.name as institution_name,
+                d.name as department_name
+            FROM institution_memberships im
+            LEFT JOIN institutions i ON i.id = im.institution_id
+            LEFT JOIN departments d ON d.id = im.department_id
+            WHERE im.user_id = $1 AND im.is_active = true
+            LIMIT 1
+        `, [userId]);
+
+        let collegeName = orgResult.rows[0]?.institution_name || "QuizPortal Institute";
+        let departmentName = orgResult.rows[0]?.department_name;
+
+        // Fetch teacher's department for legacy/fallback
+        const { data: teacherProfile } = await supabase
+            .from("profiles")
+            .select("department")
+            .ilike("email", req.user.email)
+            .single();
+
+        const teacherDept = teacherProfile?.department;
+        if (!departmentName) {
+            departmentName = teacherDept || "Computer Science";
+        }
+
         const { count: quizCount, error: quizError } = await supabase
             .from("quizzes")
             .select("*", { count: 'exact', head: true });
 
         if (quizError) throw quizError;
 
-        // Pending Evaluations (Evaluated status implies done, Submitted implies pending?)
-        // Actually, my schema uses 'submitted' for code questions needing review.
-        const { count: pendingCount, error: pendingError } = await supabase
-            .from("quiz_attempts")
-            .select("*", { count: 'exact', head: true })
-            .eq("status", "submitted");
+        let pendingCount = 0;
+        let studentCount = 0;
 
-        if (pendingError) throw pendingError;
+        const resolvedDeptFilter = teacherDept || departmentName;
 
-        // Total Students (Unique users in attempts? Or just total profiles with role student?)
-        // Let's count profiles with role 'student' (assuming role is in profiles or we infer from metadata)
-        // Since I don't have role strictly in profiles table in this context (it's in metadata),
-        // I will count unique user_ids in quiz_attempts as "Active Students".
-        // Or if I can access auth.users... no, service role can.
-        // Let's stick to unique attempt users for now as a proxy for "Engaged Students".
-        // Actually, let's just count total profiles for simplicity if possible, or 0.
-        // Better: Count unique users who have attempted any quiz.
-        // Supabase doesn't support distinct count easily via API without RPC.
-        // I'll just count total attempts for now as a simple metric, or "Students" = 0 (placeholder).
-        // Let's try to get count of profiles.
-        const { count: studentCount } = await supabase
-            .from("profiles")
-            .select("*", { count: 'exact', head: true })
-            .eq("role", "student");
+        if (resolvedDeptFilter) {
+            // Count pending attempts from students in the teacher's department
+            const { count: pCount, error: pendingError } = await supabase
+                .from("quiz_attempts")
+                .select("id, profiles!inner(department)", { count: 'exact', head: true })
+                .eq("status", "submitted")
+                .eq("profiles.department", resolvedDeptFilter);
+
+            if (pendingError) throw pendingError;
+            pendingCount = pCount || 0;
+
+            // Count students in the teacher's department
+            const { count: sCount, error: studentError } = await supabase
+                .from("profiles")
+                .select("id", { count: 'exact', head: true })
+                .eq("role", "student")
+                .eq("department", resolvedDeptFilter);
+
+            if (studentError) throw studentError;
+            studentCount = sCount || 0;
+        }
 
         res.json({
             active: quizCount || 0,
             upcoming: 0, // Placeholder
             pending: pendingCount || 0,
-            students: studentCount || 0
+            students: studentCount || 0,
+            college: collegeName,
+            department: departmentName
         });
     } catch (err) {
         console.error("Dashboard Stats Error:", err);
@@ -76,22 +319,62 @@ router.get("/dashboard", auth, authorize('teacher'), async (req, res) => {
 });
 
 // Quiz Management - list all quizzes created by teacher
-router.get("/quiz", auth, authorize('teacher'), async (req, res) => {
+router.get("/quiz", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
     try {
-        // 1. Get correct UUID from profiles
-        const { data: profile } = await supabase.from("profiles").select("id").eq("email", req.user.email).single();
-        if (!profile) throw new Error("Profile not found");
+        const userId = req.context.userId;
+        let quizzesResult;
 
-        const { data: quizzes, error } = await supabase
-            .from("quizzes")
-            .select("*")
-            .eq("created_by", profile.id) // Filter by creator
-            .order("created_at", { ascending: false });
+        if (FEATURES.NEW_ACADEMIC_MODEL) {
+            quizzesResult = await pool.query(`
+                SELECT q.*, co.subject_id
+                FROM quizzes q
+                JOIN course_offerings co ON co.id = q.course_offering_id
+                WHERE co.teacher_id = $1 AND q.is_archived = false
+                ORDER BY q.created_at DESC
+            `, [userId]);
+        } else {
+            // Fallback for legacy data without course_offerings
+            quizzesResult = await pool.query(`
+                SELECT * FROM quizzes
+                WHERE is_archived = false
+                ORDER BY created_at DESC
+            `);
+        }
 
-        if (error) throw error;
-        res.json(quizzes);
+        res.json(quizzesResult.rows);
     } catch (err) {
         console.error("Fetch Teacher Quizzes Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Soft Delete Quiz
+router.delete("/quiz/:id", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userId = req.context.userId;
+        
+        // Verify ownership
+        const verifyRes = await pool.query(`
+            SELECT q.id 
+            FROM quizzes q
+            LEFT JOIN course_offerings co ON co.id = q.course_offering_id
+            WHERE q.id = $1 AND (co.teacher_id = $2 OR q.created_by = $2)
+        `, [id, userId]);
+
+        if (verifyRes.rowCount === 0) {
+            return res.status(403).json({ error: "Unauthorized or quiz not found" });
+        }
+
+        await pool.query(`
+            UPDATE quizzes 
+            SET deleted_at = NOW(), is_archived = true 
+            WHERE id = $1
+        `, [id]);
+
+        res.json({ message: "Quiz deleted successfully" });
+    } catch (err) {
+        console.error("Delete Quiz Error:", err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -120,16 +403,30 @@ router.get("/evaluations", auth, authorize('teacher'), async (req, res) => {
     try {
         await ensureProfileEnrollmentColumn();
 
+        // Get teacher's department
+        const { data: teacherProfile } = await supabase
+            .from("profiles")
+            .select("department")
+            .ilike("email", req.user.email)
+            .single();
+
+        const teacherDept = teacherProfile?.department;
+
+        if (!teacherDept) {
+            return res.json([]);
+        }
+
         const { data, error } = await supabase
             .from("quiz_attempts")
             .select(`
                 id,
                 score,
                 status,
-                profiles(email, full_name, enrollment_no),
+                profiles!inner(email, full_name, enrollment_no, department),
                 quizzes(title)
             `)
-            .eq("status", "submitted");
+            .eq("status", "submitted")
+            .eq("profiles.department", teacherDept);
 
         if (error) throw error;
 
@@ -157,6 +454,19 @@ router.get("/evaluation/:id", auth, authorize('teacher'), async (req, res) => {
 
         const { id } = req.params;
 
+        // Get teacher's department
+        const { data: teacherProfile } = await supabase
+            .from("profiles")
+            .select("department")
+            .ilike("email", req.user.email)
+            .single();
+
+        const teacherDept = teacherProfile?.department;
+
+        if (!teacherDept) {
+            return res.status(404).json({ error: "Evaluation not found or access denied" });
+        }
+
         // Fetch Attempt
         const { data: attempt, error: attemptError } = await supabase
             .from("quiz_attempts")
@@ -170,10 +480,11 @@ router.get("/evaluation/:id", auth, authorize('teacher'), async (req, res) => {
                 started_at,
                 completed_at,
                 updated_at,
-                profiles(email, full_name, enrollment_no),
+                profiles!inner(email, full_name, enrollment_no, department),
                 quizzes(title, duration)
             `)
             .eq("id", id)
+            .eq("profiles.department", teacherDept)
             .single();
 
         if (attemptError) throw attemptError;
@@ -333,30 +644,6 @@ router.post("/problem", auth, authorize('teacher'), async (req, res) => {
     }
 });
 
-// ─── Ensure openrouter_api_key column exists ─────────────────────────
-async function ensureOpenRouterKeyColumn() {
-    await pool.query(`
-        ALTER TABLE profiles
-        ADD COLUMN IF NOT EXISTS openrouter_api_key TEXT;
-    `);
-}
-
-// ─── Ensure cerebras_api_key column exists ─────────────────────────
-async function ensureCerebrasKeyColumn() {
-    await pool.query(`
-        ALTER TABLE profiles
-        ADD COLUMN IF NOT EXISTS cerebras_api_key TEXT;
-    `);
-}
-
-// ─── Ensure mistral_api_key column exists ─────────────────────────
-async function ensureMistralKeyColumn() {
-    await pool.query(`
-        ALTER TABLE profiles
-        ADD COLUMN IF NOT EXISTS mistral_api_key TEXT;
-    `);
-}
-
 // ─── AI Settings Routes (Generalized) ────────────────────────────────
 
 // Legacy gemini-key endpoints (backward compatibility)
@@ -365,12 +652,7 @@ router.post("/settings/gemini-key", auth, authorize('teacher'), async (req, res)
         const { apiKey } = req.body;
         if (!apiKey) return res.status(400).json({ error: "API Key is required" });
 
-        const { error } = await supabase
-            .from("profiles")
-            .update({ gemini_api_key: apiKey })
-            .eq("email", req.user.email);
-
-        if (error) throw error;
+        await upsertTeacherApiKey(req.user.email, "gemini", apiKey);
         res.json({ message: "API Key saved successfully" });
     } catch (err) {
         console.error("Save Key Error:", err);
@@ -380,14 +662,8 @@ router.post("/settings/gemini-key", auth, authorize('teacher'), async (req, res)
 
 router.get("/settings/gemini-key", auth, authorize('teacher'), async (req, res) => {
     try {
-        const { data, error } = await supabase
-            .from("profiles")
-            .select("gemini_api_key")
-            .eq("email", req.user.email)
-            .single();
-
-        if (error) throw error;
-        res.json({ hasKey: !!data.gemini_api_key });
+        const apiKey = await getApiKeyForTeacher(req.user.email, "gemini");
+        res.json({ hasKey: !!apiKey });
     } catch (err) {
         console.error("Get Key Status Error:", err);
         res.status(500).json({ error: err.message });
@@ -397,17 +673,15 @@ router.get("/settings/gemini-key", auth, authorize('teacher'), async (req, res) 
 // Get all AI provider statuses for the logged-in teacher
 router.get("/settings/ai-providers", auth, authorize('teacher'), async (req, res) => {
     try {
-        await ensureOpenRouterKeyColumn();
-        await ensureCerebrasKeyColumn();
-        await ensureMistralKeyColumn();
+        const { rows } = await pool.query(`
+            SELECT pr.code, uk.encrypted_api_key
+            FROM profiles p
+            JOIN user_api_keys uk ON uk.user_id = p.id
+            JOIN providers pr ON pr.id = uk.provider_id
+            WHERE lower(p.email) = lower($1)
+        `, [req.user.email]);
 
-        const { data, error } = await supabase
-            .from("profiles")
-            .select("gemini_api_key, openrouter_api_key, cerebras_api_key, mistral_api_key")
-            .eq("email", req.user.email)
-            .single();
-
-        if (error) throw error;
+        const keyByProvider = new Map(rows.map((row) => [row.code, row.encrypted_api_key]));
 
         // Mask keys for display (show last 4 chars)
         const maskKey = (key) => {
@@ -416,40 +690,11 @@ router.get("/settings/ai-providers", auth, authorize('teacher'), async (req, res
         };
 
         res.json({
-            providers: [
-                {
-                    id: "gemini",
-                    name: "Gemini",
-                    configured: !!data.gemini_api_key,
-                    maskedKey: maskKey(data.gemini_api_key),
-                    description: "Google's Gemini AI. Fast and reliable for quiz generation.",
-                    docsUrl: "https://aistudio.google.com/apikey"
-                },
-                {
-                    id: "openrouter",
-                    name: "OpenRouter",
-                    configured: !!data.openrouter_api_key,
-                    maskedKey: maskKey(data.openrouter_api_key),
-                    description: "Access 100+ models including free ones like Google Gemma 4.",
-                    docsUrl: "https://openrouter.ai/settings/keys"
-                },
-                {
-                    id: "cerebras",
-                    name: "Cerebras",
-                    configured: !!data.cerebras_api_key,
-                    maskedKey: maskKey(data.cerebras_api_key),
-                    description: "High-performance inference for enterprise workloads.",
-                    docsUrl: "https://cloud.cerebras.ai/"
-                },
-                {
-                    id: "mistral",
-                    name: "Mistral",
-                    configured: !!data.mistral_api_key,
-                    maskedKey: maskKey(data.mistral_api_key),
-                    description: "Frontier open models from Mistral AI.",
-                    docsUrl: "https://console.mistral.ai/api-keys/"
-                }
-            ]
+            providers: Object.values(AI_PROVIDER_METADATA).map((provider) => ({
+                ...provider,
+                configured: keyByProvider.has(provider.id),
+                maskedKey: maskKey(keyByProvider.get(provider.id))
+            }))
         });
     } catch (err) {
         console.error("Get AI Providers Error:", err);
@@ -460,10 +705,6 @@ router.get("/settings/ai-providers", auth, authorize('teacher'), async (req, res
 // Save an AI provider key
 router.post("/settings/ai-key", auth, authorize('teacher'), async (req, res) => {
     try {
-        await ensureOpenRouterKeyColumn();
-        await ensureCerebrasKeyColumn();
-        await ensureMistralKeyColumn();
-
         const { provider, apiKey } = req.body;
         if (!provider || !apiKey) {
             return res.status(400).json({ error: "Provider and API Key are required." });
@@ -473,18 +714,11 @@ router.post("/settings/ai-key", auth, authorize('teacher'), async (req, res) => 
             return res.status(400).json({ error: `Invalid provider: ${provider}. Allowed: ${ai.ALLOWED_PROVIDERS.join(", ")}` });
         }
 
-        // Basic key format validation
         if (provider === "openrouter" && !apiKey.startsWith("sk-or-")) {
             return res.status(400).json({ error: "Invalid OpenRouter API key. Keys should start with 'sk-or-'." });
         }
 
-        const column = ai.PROVIDER_KEY_COLUMNS[provider];
-        const { error } = await supabase
-            .from("profiles")
-            .update({ [column]: apiKey })
-            .eq("email", req.user.email);
-
-        if (error) throw error;
+        await upsertTeacherApiKey(req.user.email, provider, apiKey);
         res.json({ message: `${provider} API key saved successfully.` });
     } catch (err) {
         console.error("Save AI Key Error:", err);
@@ -495,10 +729,6 @@ router.post("/settings/ai-key", auth, authorize('teacher'), async (req, res) => 
 // Remove an AI provider key
 router.delete("/settings/ai-key", auth, authorize('teacher'), async (req, res) => {
     try {
-        await ensureOpenRouterKeyColumn();
-        await ensureCerebrasKeyColumn();
-        await ensureMistralKeyColumn();
-
         const { provider } = req.body;
         if (!provider) {
             return res.status(400).json({ error: "Provider is required." });
@@ -508,13 +738,7 @@ router.delete("/settings/ai-key", auth, authorize('teacher'), async (req, res) =
             return res.status(400).json({ error: `Invalid provider: ${provider}.` });
         }
 
-        const column = ai.PROVIDER_KEY_COLUMNS[provider];
-        const { error } = await supabase
-            .from("profiles")
-            .update({ [column]: null })
-            .eq("email", req.user.email);
-
-        if (error) throw error;
+        await deleteTeacherApiKey(req.user.email, provider);
         res.json({ message: `${provider} API key removed.` });
     } catch (err) {
         console.error("Remove AI Key Error:", err);
@@ -533,23 +757,8 @@ router.post("/ai/generate", auth, authorize('teacher'), aiLimiter, async (req, r
             return res.status(400).json({ error: `Invalid provider: ${provider}. Allowed: ${ai.ALLOWED_PROVIDERS.join(", ")}` });
         }
 
-        console.log("AI Generate: Ensuring OpenRouter Key column...");
-        await ensureOpenRouterKeyColumn();
-        await ensureCerebrasKeyColumn();
-        await ensureMistralKeyColumn();
-
         console.log("AI Generate: Fetching key for provider...");
-        // Fetch the teacher's key for the selected provider
-        const keyColumn = ai.PROVIDER_KEY_COLUMNS[provider];
-        const { data: profile, error } = await supabase
-            .from("profiles")
-            .select(keyColumn)
-            .eq("email", req.user.email)
-            .single();
-
-        if (error) throw error;
-
-        const apiKey = profile?.[keyColumn];
+        const apiKey = await getApiKeyForTeacher(req.user.email, provider);
         if (!apiKey) {
             console.log("AI Generate: No API key found for", provider);
             return res.status(400).json({
@@ -563,6 +772,10 @@ router.post("/ai/generate", auth, authorize('teacher'), aiLimiter, async (req, r
         res.json({ questions });
     } catch (err) {
         console.error("AI Generate Route Error:", err);
+        // Distinguish rate-limit errors (tagged with RATE_LIMIT: prefix by provider handlers)
+        if (err.message?.startsWith("RATE_LIMIT:")) {
+            return res.status(429).json({ error: err.message.replace("RATE_LIMIT: ", "") });
+        }
         res.status(500).json({ error: err.message });
     }
 });
@@ -572,7 +785,19 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
     try {
         await ensureQuestionFunctionNameColumn();
 
-        const { title, subject, duration, totalMarks, description, questions, department, semester } = req.body;
+        const {
+            title,
+            subject,
+            subjectId,
+            courseOfferingId, // New field
+            duration,
+            totalMarks,
+            description,
+            questions,
+            department,
+            semester,
+            scheduledAt
+        } = req.body;
 
         // Fetch valid UUID from Supabase profiles
         const { data: profile, error } = await supabase
@@ -584,27 +809,129 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
         if (!profile) throw new Error(`Profile not found for user: ${req.user.email} (Error: ${error?.message})`);
         const userId = profile.id;
 
+        // New clients submit subjectId. Resolve its display values too while older
+        // clients can continue submitting subject/department/semester text.
+        let resolvedSubjectId = subjectId || null;
+        let resolvedSubject = subject || null;
+        let resolvedDepartment = department || null;
+        let resolvedSemester = semester || null;
+        let resolvedInstitutionId = null;
+        let resolvedCourseOfferingId = null;
+
+        if (resolvedSubjectId) {
+            const { data: subjectRecord, error: subjectError } = await supabase
+                .from("subjects")
+                .select("id, name, institution_id, program_id, academic_term_id, programs(department_id, departments(name)), academic_terms(term_number, term_type), institutions(name)")
+                .eq("id", resolvedSubjectId)
+                .single();
+
+            if (subjectError || !subjectRecord) {
+                return res.status(400).json({ error: "Invalid subjectId." });
+            }
+
+            resolvedSubjectId = subjectRecord.id;
+            resolvedSubject = subjectRecord.name;
+            resolvedInstitutionId = subjectRecord.institution_id || null;
+            resolvedDepartment = subjectRecord.programs?.departments?.name || resolvedDepartment;
+            resolvedSemester = subjectRecord.academic_terms?.term_number?.toString() || resolvedSemester;
+
+            const { data: courseOffering } = await supabase
+                .from("course_offerings")
+                .select("id")
+                .eq("institution_id", resolvedInstitutionId)
+                .eq("subject_id", resolvedSubjectId)
+                .eq("academic_term_id", subjectRecord.academic_term_id)
+                .is("section_id", null)
+                .eq("teacher_id", userId)
+                .maybeSingle();
+
+            if (courseOffering?.id) {
+                resolvedCourseOfferingId = courseOffering.id;
+            } else {
+                const { data: newOffering, error: offeringError } = await supabase
+                    .from("course_offerings")
+                    .insert({
+                        institution_id: resolvedInstitutionId,
+                        subject_id: resolvedSubjectId,
+                        teacher_id: userId,
+                        academic_term_id: subjectRecord.academic_term_id,
+                        section_id: null
+                    })
+                    .select("id")
+                    .single();
+
+                if (offeringError) throw offeringError;
+                resolvedCourseOfferingId = newOffering.id;
+            }
+        }
+
+        let insertPayload = {
+            title,
+            duration,
+            total_marks: totalMarks,
+            description,
+            quiz_type: "hybrid",
+            scheduled_at: scheduledAt || new Date()
+        };
+
+        if (FEATURES.NEW_ACADEMIC_MODEL) {
+            if (!courseOfferingId) throw new Error("courseOfferingId is required in new academic model");
+            
+            // Runtime Tenant & Ownership Verification
+            const { data: co } = await supabase
+                .from("course_offerings")
+                .select("institution_id, teacher_id")
+                .eq("id", courseOfferingId)
+                .single();
+            if (!co) throw new Error("Invalid courseOfferingId");
+            if (co.teacher_id !== userId) throw new Error("Unauthorized: You do not own this course offering");
+
+            // Optional: You could also verify if the teacher is still an active member of co.institution_id
+            
+            insertPayload = {
+                ...insertPayload,
+                institution_id: co.institution_id,
+                course_offering_id: courseOfferingId
+                // Strictly omitted: subject, subject_id, department, semester, created_by
+            };
+        } else {
+            insertPayload = {
+                ...insertPayload,
+                institution_id: resolvedInstitutionId,
+                course_offering_id: resolvedCourseOfferingId,
+                subject_id: resolvedSubjectId,
+                subject: resolvedSubject,
+                created_by: userId,
+                department: resolvedDepartment,
+                semester: resolvedSemester
+            };
+        }
+
         // 1. Create Quiz
         const { data: quiz, error: quizError } = await supabase
             .from("quizzes")
-            .insert({
-                title,
-                subject,
-                duration,
-                total_marks: totalMarks,
-                description,
-                created_by: userId,
-                quiz_type: "hybrid",
-                department,
-                semester,
-                scheduled_at: req.body.scheduledAt || new Date() // Default to now if not provided
-            })
+            .insert(insertPayload)
             .select()
             .single();
 
         if (quizError) throw quizError;
+        
+        // Migration Metrics Logging
+        quizCreationMigration.labels({
+            mode: FEATURES.NEW_ACADEMIC_MODEL ? "new-only" : "dual-write",
+            schemaVersion: FEATURES.NEW_ACADEMIC_MODEL ? "2" : "1"
+        }).inc();
 
-        const { generateTopic } = require("../utils/dynamicTopicGenerator");
+        // Push audit event
+        auditQueue.add("quiz_created", {
+            userId,
+            event: "Quiz Created",
+            metadata: {
+                quizId: quiz.id,
+                title,
+                courseOfferingId: courseOfferingId || null
+            }
+        }).catch(err => console.error("Failed to enqueue audit event:", err));
 
         // 2. Process Questions
         for (const q of questions) {
@@ -659,15 +986,16 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
             }
         }
 
-        res.json({ message: "Quiz created successfully", quizId: quiz.id });
+        res.json({ 
+            message: "Quiz created successfully", 
+            quizId: quiz.id,
+            schemaVersion: FEATURES.NEW_ACADEMIC_MODEL ? 2 : 1 
+        });
     } catch (err) {
         console.error("Quiz Creation Error:", err);
         res.status(500).json({ error: err.message });
     }
 });
-
-const judge0 = require("../utils/judge0");
-const ai = require("../utils/ai");
 
 // Auto-Evaluate Attempt
 router.post("/evaluate/:id", auth, authorize('teacher'), aiLimiter, async (req, res) => {
@@ -677,24 +1005,12 @@ router.post("/evaluate/:id", auth, authorize('teacher'), aiLimiter, async (req, 
         await ensureQuestionFunctionNameColumn();
 
         console.log("AI Evaluate: Fetching key for provider", provider);
-        // Ensure all key columns exist
-        await ensureOpenRouterKeyColumn();
-        await ensureCerebrasKeyColumn();
-        await ensureMistralKeyColumn();
-
         if (!ai.ALLOWED_PROVIDERS.includes(provider)) {
             return res.status(400).json({ error: `Invalid provider: ${provider}` });
         }
 
         // Fetch Teacher's API Key for the selected provider
-        const keyColumn = ai.PROVIDER_KEY_COLUMNS[provider];
-        const { data: profile } = await supabase
-            .from("profiles")
-            .select(keyColumn)
-            .eq("email", req.user.email)
-            .single();
-
-        const apiKey = profile?.[keyColumn];
+        const apiKey = await getApiKeyForTeacher(req.user.email, provider);
         if (!apiKey) {
             return res.status(400).json({ error: `${provider} API Key is required for auto-evaluation. Please set it in Settings.` });
         }

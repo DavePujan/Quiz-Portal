@@ -3,6 +3,8 @@ const { createClient } = require("@supabase/supabase-js");
 const { auth } = require("../middleware/auth");
 const { analyzeCode } = require("../utils/ai");
 const { buildWrappedCode } = require("../utils/codeExecution");
+const { FEATURES } = require("../config/features");
+const { auditQueue } = require("../queues/auditQueue");
 const pool = require("../db");
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -178,13 +180,20 @@ async function persistBehaviorForAttempt(userId, quizId, attemptId) {
 // Get All Active Quizzes for Students
 router.get("/quizzes", auth, async (req, res) => {
     try {
-        const { data: quizzes, error } = await supabase
-            .from("quizzes")
-            // Join with profiles using the foreign key 'created_by'
-            // Syntax: select(*, alias:referenced_table!fk_check(cols))
-            // Assuming simplified FK detection or explicit join:
-            .select("*, creator:profiles!created_by(full_name, email)")
-            .order("created_at", { ascending: false });
+        let query;
+        if (FEATURES.NEW_ACADEMIC_MODEL) {
+            query = supabase
+                .from("quizzes")
+                .select("*, course_offering:course_offerings(teacher:profiles!teacher_id(full_name, email))")
+                .order("created_at", { ascending: false });
+        } else {
+            query = supabase
+                .from("quizzes")
+                .select("*, creator:profiles!created_by(full_name, email)")
+                .order("created_at", { ascending: false });
+        }
+
+        const { data: quizzes, error } = await query;
 
         if (error) throw error;
 
@@ -392,12 +401,23 @@ router.get("/quiz/:id", auth, async (req, res) => {
             .limit(1)
             .maybeSingle();
 
+        let quizQuery;
+        if (FEATURES.NEW_ACADEMIC_MODEL) {
+            quizQuery = supabase
+                .from("quizzes")
+                .select("*, course_offering:course_offerings(teacher:profiles!teacher_id(full_name, email))")
+                .eq("id", id)
+                .single();
+        } else {
+            quizQuery = supabase
+                .from("quizzes")
+                .select("*, creator:profiles!created_by(full_name, email)")
+                .eq("id", id)
+                .single();
+        }
+
         // Fetch Quiz Metadata
-        const { data: quiz, error: quizError } = await supabase
-            .from("quizzes")
-            .select("*, creator:profiles!created_by(full_name, email)")
-            .eq("id", id)
-            .single();
+        const { data: quiz, error: quizError } = await quizQuery;
 
         if (quizError) throw quizError;
 
@@ -506,6 +526,12 @@ router.get("/quiz/:id", auth, async (req, res) => {
                     question_order: questionOrder,
                     option_order: optionOrder
                 });
+            
+            auditQueue.add("quiz_started", {
+                userId,
+                event: "Quiz Started",
+                metadata: { quizId: id }
+            }).catch(err => console.error("Failed to enqueue audit event:", err));
         }
 
         const questionMap = new Map(questionsWithDetails.map((q) => [String(q.id), q]));
@@ -686,6 +712,12 @@ router.post("/quiz/:id/attempt", auth, async (req, res) => {
             attemptId: attempt.id,
             integrity
         });
+        
+        auditQueue.add("quiz_submitted", {
+            userId,
+            event: "Quiz Submitted",
+            metadata: { quizId: id, attemptId: attempt.id, score: totalScore }
+        }).catch(err => console.error("Failed to enqueue audit event:", err));
 
     } catch (err) {
         console.error("Submit Quiz Error:", err);

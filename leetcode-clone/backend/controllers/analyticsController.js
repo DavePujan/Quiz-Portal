@@ -195,10 +195,21 @@ async function resolveStudentProfileId(req, routeId) {
 // ================================
 const getQuizAnalytics = async (req, res) => {
   const { quizId } = req.params;
-  const cacheKey = `analytics:teacher:quiz:${quizId}:ai-v2`;
 
   try {
     await ensureProfileEnrollmentColumn();
+
+    const teacherEmail = req.user?.email;
+    let teacherDept = null;
+    if (teacherEmail) {
+      const teacherResult = await pool.query(
+        "SELECT department FROM profiles WHERE email = $1 LIMIT 1",
+        [teacherEmail]
+      );
+      teacherDept = teacherResult.rows[0]?.department || null;
+    }
+
+    const cacheKey = `analytics:teacher:quiz:${quizId}:${teacherDept || 'no-dept'}:ai-v2`;
 
     if (redisClient.isAvailable) {
       const cached = await redisClient.get(cacheKey);
@@ -277,10 +288,12 @@ const getQuizAnalytics = async (req, res) => {
         ) AS min_percentage
       FROM quiz_attempts qa
       LEFT JOIN quiz_marks qm ON qm.quiz_id = qa.quiz_id
+      LEFT JOIN profiles p ON p.id = qa.user_id
       WHERE qa.quiz_id = $1
-        AND qa.status IN ('submitted', 'evaluated');
+        AND qa.status IN ('submitted', 'evaluated')
+        AND p.department = $2;
     `;
-    const overviewResult = await pool.query(overviewQuery, [quizId]);
+    const overviewResult = await pool.query(overviewQuery, [quizId, teacherDept || ""]);
 
     /* --------------------------------
        2. SCORE DISTRIBUTION (Percentage Based)
@@ -304,12 +317,14 @@ const getQuizAnalytics = async (req, res) => {
         COUNT(*) AS students
       FROM quiz_attempts qa
       LEFT JOIN quiz_marks qm ON qm.quiz_id = qa.quiz_id
+      LEFT JOIN profiles p ON p.id = qa.user_id
       WHERE qa.quiz_id = $1
         AND qa.status IN ('submitted', 'evaluated')
+        AND p.department = $2
       GROUP BY bucket
       ORDER BY bucket;
     `;
-    const scoreDistResult = await pool.query(scoreDistQuery, [quizId]);
+    const scoreDistResult = await pool.query(scoreDistQuery, [quizId, teacherDept || ""]);
 
     // Fill missing buckets for cleaner chart
     const fullBuckets = [];
@@ -340,15 +355,17 @@ const getQuizAnalytics = async (req, res) => {
       FROM quiz_answers qa
       JOIN questions q ON q.id = qa.question_id
       WHERE qa.attempt_id IN (
-        SELECT id FROM quiz_attempts
-        WHERE quiz_id = $1
-        AND status IN ('submitted', 'evaluated')
+        SELECT qa2.id FROM quiz_attempts qa2
+        LEFT JOIN profiles p ON p.id = qa2.user_id
+        WHERE qa2.quiz_id = $1
+          AND qa2.status IN ('submitted', 'evaluated')
+          AND p.department = $2
       )
       GROUP BY q.id, q.title, q.type;
     `;
     const questionDifficultyResult = await pool.query(
       questionDifficultyQuery,
-      [quizId]
+      [quizId, teacherDept || ""]
     );
 
     const enrichedQuestionDifficulty = await enrichQuestionsWithAI(questionDifficultyResult.rows);
@@ -385,10 +402,11 @@ const getQuizAnalytics = async (req, res) => {
       LEFT JOIN quiz_marks qm ON qm.quiz_id = qa.quiz_id
       WHERE qa.quiz_id = $1
         AND qa.status IN ('submitted', 'evaluated')
+        AND p.department = $2
       ORDER BY score DESC
       LIMIT 5;
     `;
-    const topStudentsResult = await pool.query(topStudentsQuery, [quizId]);
+    const topStudentsResult = await pool.query(topStudentsQuery, [quizId, teacherDept || ""]);
 
     /* --------------------------------
        3.6 LIVE ACTIVITY (STRICTLY for live quizzes)
@@ -398,17 +416,21 @@ const getQuizAnalytics = async (req, res) => {
       const activeStudentsQuery = `
         SELECT COUNT(DISTINCT qa.user_id) AS active
         FROM quiz_attempts qa
+        LEFT JOIN profiles p ON p.id = qa.user_id
         WHERE qa.quiz_id = $1
           AND qa.status IN ('submitted', 'evaluated')
-          AND qa.submitted_at >= NOW() - INTERVAL '10 minutes';
+          AND qa.submitted_at >= NOW() - INTERVAL '10 minutes'
+          AND p.department = $2;
       `;
 
       const recentSubmissionsQuery = `
         SELECT COUNT(*) AS recent_submissions
         FROM quiz_attempts qa
+        LEFT JOIN profiles p ON p.id = qa.user_id
         WHERE qa.quiz_id = $1
           AND qa.status IN ('submitted', 'evaluated')
-          AND qa.submitted_at >= NOW() - INTERVAL '5 minutes';
+          AND qa.submitted_at >= NOW() - INTERVAL '5 minutes'
+          AND p.department = $2;
       `;
 
       const avgTimePerQuestionQuery = `
@@ -424,19 +446,21 @@ const getQuizAnalytics = async (req, res) => {
             2
           ) AS avg_time
         FROM quiz_attempts qa
+        LEFT JOIN profiles p ON p.id = qa.user_id
         LEFT JOIN (
           SELECT attempt_id, COUNT(*) AS answer_count
           FROM quiz_answers
           GROUP BY attempt_id
         ) ans_cnt ON ans_cnt.attempt_id = qa.id
         WHERE qa.quiz_id = $1
-          AND qa.status IN ('submitted', 'evaluated');
+          AND qa.status IN ('submitted', 'evaluated')
+          AND p.department = $2;
       `;
 
       const [activeStudentsResult, recentSubmissionsResult, avgTimePerQuestionResult] = await Promise.all([
-        pool.query(activeStudentsQuery, [quizId]),
-        pool.query(recentSubmissionsQuery, [quizId]),
-        pool.query(avgTimePerQuestionQuery, [quizId])
+        pool.query(activeStudentsQuery, [quizId, teacherDept || ""]),
+        pool.query(recentSubmissionsQuery, [quizId, teacherDept || ""]),
+        pool.query(avgTimePerQuestionQuery, [quizId, teacherDept || ""])
       ]);
 
       const avgTimeValue = avgTimePerQuestionResult.rows[0]?.avg_time;
@@ -627,9 +651,10 @@ const getQuizAnalytics = async (req, res) => {
       LEFT JOIN latest_integrity li ON li.attempt_id = qa.id
       WHERE qa.quiz_id = $1
         AND qa.status IN ('submitted', 'evaluated')
+        AND p.department = $2
       ORDER BY percentage DESC, marks DESC;
     `;
-    const studentReportResult = await pool.query(studentReportQuery, [quizId]);
+    const studentReportResult = await pool.query(studentReportQuery, [quizId, teacherDept || ""]);
 
     const studentReport = studentReportResult.rows.map((row) => {
       const pct = Number(row.percentage || 0);
@@ -722,6 +747,16 @@ const exportQuizAnalyticsCsv = async (req, res) => {
   try {
     await ensureProfileEnrollmentColumn();
 
+    const teacherEmail = req.user?.email;
+    let teacherDept = null;
+    if (teacherEmail) {
+      const teacherResult = await pool.query(
+        "SELECT department FROM profiles WHERE email = $1 LIMIT 1",
+        [teacherEmail]
+      );
+      teacherDept = teacherResult.rows[0]?.department || null;
+    }
+
     const quizMetaQuery = `
       SELECT id, title, COALESCE(subject, 'General') AS subject, COALESCE(department, '-') AS department, COALESCE(semester, '-') AS semester
       FROM quizzes
@@ -798,10 +833,11 @@ const exportQuizAnalyticsCsv = async (req, res) => {
       LEFT JOIN latest_integrity li ON li.attempt_id = qa.id
       WHERE qa.quiz_id = $1
         AND qa.status IN ('submitted', 'evaluated')
+        AND p.department = $2
       ORDER BY percentage DESC, marks DESC;
     `;
 
-    const rowsResult = await pool.query(exportQuery, [quizId]);
+    const rowsResult = await pool.query(exportQuery, [quizId, teacherDept || ""]);
 
     const lines = [];
     lines.push(`Department,${csvCell(quizMeta.department)}`);

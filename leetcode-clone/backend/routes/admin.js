@@ -2,21 +2,37 @@ const router = require("express").Router();
 const { createClient } = require("@supabase/supabase-js");
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
+const pool = require("../db");
 const { auth, authorize } = require("../middleware/auth");
 const User = require("../models/User");
 const AccessRequest = require("../models/AccessRequest");
 const crypto = require("crypto");
 
-
-
 router.get("/requests", auth, authorize('admin'), async (req, res) => {
     try {
         console.log("Fetching pending access requests...");
-        const { data, error } = await supabase
+        
+        // Fetch approving admin's institution (using email join to bypass mock model integer vs UUID format discrepancy)
+        const adminMember = await pool.query(`
+            SELECT im.institution_id 
+            FROM institution_memberships im
+            JOIN profiles p ON p.id = im.user_id
+            WHERE LOWER(p.email) = LOWER($1) AND im.role = 'admin' AND im.is_active = true 
+            LIMIT 1
+        `, [req.user.email]);
+        const adminInstId = adminMember.rows[0]?.institution_id;
+
+        let query = supabase
             .from("access_requests")
             .select("*")
             .eq("status", "pending")
-            .order("created_at", { ascending: false });
+            .neq("role", "admin");
+
+        if (adminInstId) {
+            query = query.eq("institution_id", adminInstId);
+        }
+
+        const { data, error } = await query.order("created_at", { ascending: false });
 
         if (error) {
             console.error("Supabase Error fetching requests:", error);
@@ -44,15 +60,41 @@ router.post("/approve-request", auth, authorize('admin'), async (req, res) => {
 
         if (fetchError || !reqData) return res.status(404).json({ error: "Request not found" });
 
-        // 2. Insert into Profiles (Create User)
-        // Check if profile exists (maybe created via OAuth just now?)
-        const { data: existingProfile } = await supabase.from("profiles").select("id").eq("email", email).single();
+        // 2. Fetch approving admin's institution (using email join to bypass mock model integer vs UUID format discrepancy)
+        const adminMember = await pool.query(`
+            SELECT im.institution_id 
+            FROM institution_memberships im
+            JOIN profiles p ON p.id = im.user_id
+            WHERE LOWER(p.email) = LOWER($1) AND im.role = 'admin' AND im.is_active = true 
+            LIMIT 1
+        `, [req.user.email]);
+        const adminInstId = adminMember.rows[0]?.institution_id;
+        const instId = reqData.institution_id || adminInstId;
+
+        // 3. Resolve department record (if department text is present)
+        let departmentRecord = null;
+        if (reqData.department) {
+            const { data: departments, error: departmentsError } = await supabase
+                .from("departments")
+                .select("id, code, name");
+
+            if (departmentsError) throw departmentsError;
+
+            const requestedDepartment = String(reqData.department || "").trim().toLowerCase();
+            departmentRecord = (departments || []).find((department) =>
+                department.code?.toLowerCase() === requestedDepartment ||
+                department.name?.toLowerCase() === requestedDepartment
+            );
+        }
+
+        // 4. Insert/upsert public.profiles (no department_id on profiles table)
+        const { data: existingProfile } = await supabase.from("profiles").select("id").eq("email", email).maybeSingle();
 
         const profileData = {
             id: existingProfile?.id || crypto.randomUUID(), // Preserve ID if exists
             email: reqData.email,
             role: reqData.role,
-            department: reqData.department, // Transfer department
+            department: reqData.department, // Transfer department text
             provider: reqData.provider,
             full_name: reqData.name || null, // Transfer name
             password: reqData.password || null, // Transfer hashed password
@@ -65,18 +107,38 @@ router.post("/approve-request", auth, authorize('admin'), async (req, res) => {
 
         if (upsertError) throw upsertError;
 
-        // 3. Delete Request (or update status to approved)
-        // Let's delete to keep table clean as per user wish "shifted"
+        const profileId = existingProfile?.id || profileData.id;
+
+        // 5. Create institution membership
+        if (instId) {
+            await pool.query(`
+                INSERT INTO institution_memberships (user_id, institution_id, role, department_id, is_active)
+                VALUES ($1, $2, $3, $4, true)
+                ON CONFLICT DO NOTHING
+            `, [profileId, instId, reqData.role, departmentRecord?.id || null]);
+        }
+
+        // Sync to mock model memory if relevant so login succeeds
+        const User = require("../models/User");
+        let localUser = User.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+        if (!localUser) {
+            User.push({
+                id: User.length + 1,
+                email: reqData.email,
+                password: reqData.password || "$2b$10$DHpOtH1eSROzewp8bQjFt..aSCsvy9GrInyHi6CXZUM8JCm6ROySq", // password
+                role: reqData.role,
+                provider: "local",
+                isVerified: true
+            });
+        }
+
+        // 6. Delete Request
         const { error: deleteError } = await supabase
             .from("access_requests")
             .delete()
             .eq("email", email);
 
         if (deleteError) throw deleteError;
-
-        // Update local memory if still using it for quick lookups (optional but safer)
-        // const newUser = { ...profileData, id: profileData.id, isVerified: true };
-        // User.push(newUser); // simplified sync
 
         res.json({ message: "Access request approved & user created." });
 
@@ -88,7 +150,10 @@ router.post("/approve-request", auth, authorize('admin'), async (req, res) => {
 
 router.get("/dashboard", auth, authorize('admin'), async (req, res) => {
     try {
-        const { count: totalUsers } = await supabase.from("profiles").select("*", { count: "exact", head: true });
+        const { count: totalUsers } = await supabase
+            .from("profiles")
+            .select("*", { count: "exact", head: true })
+            .neq("role", "master_admin");
 
         // Active Quizzes (is_active = true)
         const { count: activeQuizzes } = await supabase
@@ -118,21 +183,15 @@ router.get("/dashboard", auth, authorize('admin'), async (req, res) => {
 
 router.get("/users", auth, authorize('admin'), async (req, res) => {
     try {
-        const { data, error } = await supabase.from("profiles").select("*");
+        const { data, error } = await supabase
+            .from("profiles")
+            .select("*")
+            .neq("role", "master_admin");
         if (error) throw error;
         res.json(data);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
-});
-
-router.patch("/user/role", auth, authorize('admin'), async (req, res) => {
-    const { userId, role } = req.body;
-    const user = await User.findOne({ id: parseInt(userId) });
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    user.role = role;
-    res.json({ message: "Role updated", user });
 });
 
 router.patch("/promote", auth, authorize('admin'), async (req, res) => {
@@ -183,10 +242,6 @@ router.delete("/user", auth, authorize('admin'), async (req, res) => {
 
         if (error) throw error;
 
-        // Also delete from users array if using mock (optional cleanup)
-        // const idx = User.findIndex(u => u.email === email);
-        // if (idx >= 0) User.splice(idx, 1);
-
         res.json({ message: "User removed successfully." });
     } catch (err) {
         console.error("Delete User Error:", err);
@@ -194,25 +249,21 @@ router.delete("/user", auth, authorize('admin'), async (req, res) => {
     }
 });
 
-
 // Settings Routes
 router.get("/settings", auth, authorize('admin'), async (req, res) => {
     try {
         const { data, error } = await supabase.from("settings").select("*");
         if (error) throw error;
 
-        // Transform array to object
         const settings = {
-            allowRegistrations: true, // defaults
-            allowTeachers: true,
-            maintenanceMode: false
+            allowRegistrations: true,
+            allowTeachers: true
         };
 
         if (data) {
             data.forEach(item => {
                 if (item.key === 'allowRegistrations') settings.allowRegistrations = item.value;
                 if (item.key === 'allowTeachers') settings.allowTeachers = item.value;
-                if (item.key === 'maintenanceMode') settings.maintenanceMode = item.value;
             });
         }
 
@@ -224,13 +275,12 @@ router.get("/settings", auth, authorize('admin'), async (req, res) => {
 });
 
 router.post("/settings", auth, authorize('admin'), async (req, res) => {
-    const { allowRegistrations, allowTeachers, maintenanceMode } = req.body;
+    const { allowRegistrations, allowTeachers } = req.body;
 
     try {
         const updates = [
             { key: 'allowRegistrations', value: allowRegistrations },
-            { key: 'allowTeachers', value: allowTeachers },
-            { key: 'maintenanceMode', value: maintenanceMode }
+            { key: 'allowTeachers', value: allowTeachers }
         ];
 
         const { error } = await supabase
