@@ -1,715 +1,112 @@
-Here’s a **production-ready deployment architecture** for your Quiz Portal with:
+# Quiz Portal Production Deployment Architecture
+
+This document outlines the end-to-end production architecture for the Quiz Portal, optimized for a **$0/month free-tier stack** with a dedicated paid Azure VM for Judge0 (funded by the $100 Azure credit).
+
+## Cost Summary
+
+| Component | Provider | Monthly Cost |
+| :--- | :--- | :--- |
+| Frontend | Vercel (free tier) | $0 |
+| Backend API | Render (free web service) | $0 |
+| Submission Worker | Render (free worker) | $0 |
+| Audit Worker | Render (free worker) | $0 |
+| Redis | Upstash (free tier — 500K commands/month) | $0 |
+| Judge0 Sandbox | Azure B2S VM (2 vCPU / 4GB RAM) | ~$30–35 |
+| Database & Auth | Supabase (free tier — 500MB DB) | $0 |
+| **Total** | | **~$30–35/month** |
+| **Runway on $100 credit** | | **~3 months** |
+
+> [!IMPORTANT]
+> The $100 Azure credit is spent **exclusively** on the Judge0 VM. Everything else is genuinely $0. The B2S size was chosen because Judge0's docker-compose stack (API + worker + its own Postgres + its own Redis) needs ~2–4GB to avoid OOM under concurrent submissions. The B1S (1GB) is too tight for anything beyond solo sequential testing.
+
+> [!WARNING]
+> **Known free-tier tradeoffs (non-Judge0 components):**
+> - **Render cold starts:** API spins down after ~15 min idle; cold start is ~30–50s. Mitigate with a free cron ping (e.g., cron-job.org hitting `/health` every 10 min during expected demo hours).
+> - **Supabase free tier pauses** after 1 week of inactivity — same cron ping strategy works.
+> - **Upstash 500K commands/month** is generous for dev/portfolio but will be exceeded under sustained real classroom traffic.
+
+## Target Architecture
+
+```mermaid
+flowchart TD
+    User([User Browser])
+    
+    subgraph Vercel [Vercel Free Tier]
+        ReactApp[Vite React App + CDN]
+    end
+    
+    subgraph SupabaseCloud [Supabase Free Tier]
+        DB[(PostgreSQL DB)]
+        Edge[Edge Functions]
+    end
+    
+    subgraph Render [Render Free Tier]
+        API[Express API - Web Service]
+        SubmitWorker[Submission Worker]
+        AuditWorker[Audit Worker]
+    end
+
+    subgraph Upstash [Upstash Free Tier]
+        Redis[(Serverless Redis)]
+    end
+    
+    subgraph Azure [Azure - Paid from $100 Credit]
+        subgraph Judge0VM [B2S VM - 2 vCPU / 4GB RAM]
+            Judge0[Judge0 API + Worker]
+            Judge0PG[(Judge0 Postgres)]
+            Judge0Redis[(Judge0 Redis)]
+        end
+    end
+    
+    ExternalAI([External AI - OpenAI/Gemini])
+
+    User -- HTTPS --> ReactApp
+    ReactApp -- HTTPS --> API
+    
+    API -- Read/Write --> DB
+    API -- Enqueue --> Redis
+    
+    SubmitWorker -- Dequeue --> Redis
+    AuditWorker -- Dequeue --> Redis
+    
+    SubmitWorker -- Read/Write --> DB
+    AuditWorker -- Write --> DB
+    
+    SubmitWorker -- HTTPS --> Judge0
+    SubmitWorker -- HTTPS --> ExternalAI
+    
+    Judge0 --- Judge0PG
+    Judge0 --- Judge0Redis
+```
+
+### Component Breakdown
+
+| Component | Provider | Justification |
+| :--- | :--- | :--- |
+| **Frontend** | Vercel (free) | Vite/React static hosting with CDN, preview deployments, and automated CI/CD from GitHub. No catches at this tier. |
+| **Backend API** | Render (free web service) | Runs `node server.js` with Express & Socket.io. Single instance (no horizontal scaling on free tier). **Scalability Note:** Uses `@socket.io/redis-adapter` so if upgraded to a paid tier with multiple instances in the future, room/broadcast state is already shared via Upstash Redis. |
+| **Workers** | Render (free workers) | Two separate Render services: one for `submission.worker.js`, one for `audit.worker.js`. Both consume from Upstash Redis queues. **Internal Networking:** Workers connect to the API's public Render URL via `socket.io-client` to emit real-time status updates (`BACKEND_URL` env var). <br><br> **Evaluation Split:** `submission.worker.js` handles Code Execution (Judge0 + external AI). The Supabase Edge Function `evaluate-attempt` handles MCQ scoring. No overlap. |
+| **Redis** | Upstash (free — 500K cmds/month) | Serverless Redis-compatible. Works with BullMQ via `ioredis`, rate limiting via `rate-limit-redis`, and `@socket.io/redis-adapter`. TLS enforced by default on Upstash. |
+| **Judge0 Sandbox** | Azure B2S VM ($30–35/month from credit) | **Security critical.** Judge0 runs untrusted user code via privileged Docker containers. The B2S (2 vCPU / 4GB RAM) provides enough headroom for Judge0's full docker-compose stack (API + worker + its own bundled Postgres + its own Redis) plus concurrent code-execution containers. **Judge0's internal Postgres and Redis stay on-VM** — they are Judge0-specific (job queue metadata, submission results) and should NOT be pointed at Supabase or Upstash. **NSG rules:** Inbound SSH from admin IP only. Port 2358 is closed to the public internet entirely. All cross-cloud traffic from Render is routed securely through an outbound-only Cloudflare Tunnel established on the VM. **Outbound egress default-deny** to prevent submitted code from reaching the internet. |
+| **Database** | Supabase (free — 500MB) | Managed PostgreSQL with connection pooling and RLS. Note: Authentication (including Google/GitHub OAuth and email logins) is handled entirely in-house via the Express API using Passport and custom JWT middleware rather than using Supabase's built-in Auth service. |
+| **Edge Functions** | Supabase (free) | Lightweight MCQ evaluation via `evaluate-attempt`. |
+
+### Two Separate Redis Instances (Important Distinction)
+
+| Redis Instance | Purpose | Location |
+| :--- | :--- | :--- |
+| **Upstash** | App-level: BullMQ queues, rate limiting, Socket.io adapter, token blacklisting | Cloud (Upstash free tier) |
+| **Judge0's bundled Redis** | Judge0-internal: job queue for sandbox workers | On-VM (inside docker-compose) |
+
+These are completely independent. Your app code (`config/redis.js`, `submission.queue.js`, `rateLimiter.js`) connects to Upstash. Judge0's docker-compose connects to its own containerized Redis. They never talk to each other.
 
-- React + Vite frontend
-- Express backend
-- Supabase DB + Auth
-- OAuth (Google/GitHub)
-- AI services (OpenAI/Groq/Gemini)
-- Swagger docs
+### Cross-Cloud Networking: Render → Azure Judge0
 
-I’ll keep it **real-world and scalable**, not just classroom theory.
+This is the one connection that spans cloud providers and needs specific care:
 
----
-
-# 🧱 High-Level Architecture
-
-![Image](https://miro.medium.com/v2/da%3Atrue/resize%3Afit%3A1200/0%2AwouaTy_Y0NivEaEt)
-
-![Image](https://miro.medium.com/0%2AOzrQ7RLuH9jAvhg9.png)
-
-![Image](https://miro.medium.com/1%2Ab9pfEAzTVZMW-srS9rZBIg.jpeg)
-
-![Image](https://images-www.contentful.com/fo9twyrwpveg/sz24EGGpoxenPyGltVYQS/28c6fc5be6c6bc9544c0f2ccf4ce275a/image1.png)
-
----
-
-# ✅ Recommended Production Setup
-
-```
-Users
-  ↓
-Frontend (Vercel)
-  ↓
-Backend API (Railway/Render/Fly.io)
-  ↓
-Supabase (DB + Auth)
-  ↓
-External APIs (AI, OAuth)
-```
-
----
-
-# 🌍 1) Frontend Deployment
-
-### ✅ Platform
-
-**Vercel (Best for Vite + React)**
-
-### Why Vercel?
-
-- Auto CI/CD from GitHub
-- Instant rollbacks
-- Global CDN
-- Preview deploys for PRs
-
-### Flow
-
-```
-GitHub push → Vercel auto-build → Live site
-```
-
-### Frontend Environment Variables
-
-```
-VITE_API_URL
-VITE_SUPABASE_URL
-VITE_SUPABASE_ANON_KEY
-```
-
-⚠️ Never expose service role keys here.
-
----
-
-# ⚙️ 2) Backend Deployment
-
-### ✅ Platform Options (Choose one)
-
-**Best choices:**
-
-- Render
-
-### Why not Vercel for backend?
-
-Your backend:
-
-- Uses auth sessions
-- AI APIs
-- ML libs (Tensorflow)
-- Long-running tasks
-
-Serverless = costly + cold starts.
-
----
-
-### Backend Flow
-
-```
-GitHub → CI tests → Deploy → Backend live
-```
-
-### Backend Env Variables
-
-```
-SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY
-JWT_SECRET
-
-OPENAI_API_KEY
-GROQ_API_KEY
-GOOGLE_AI_KEY
-
-GOOGLE_CLIENT_ID
-GOOGLE_CLIENT_SECRET
-GITHUB_CLIENT_ID
-GITHUB_CLIENT_SECRET
-```
-
----
-
-# 🗄️ 3) Database Layer (Supabase)
-
-Supabase handles:
-
-✅ PostgreSQL DB
-✅ Authentication
-✅ Row Level Security
-✅ Storage (optional)
-✅ Realtime (optional)
-
----
-
-### Security Best Practices
-
-Enable:
-
-✔ Row Level Security (RLS)
-✔ Policies per user
-✔ Service role key only on backend
-✔ Daily DB backups
-
----
-
-# 🔐 4) Authentication Architecture
-
-You use:
-
-- Passport
-- Google OAuth
-- GitHub OAuth
-- JWT
-- Supabase Auth
-
-### Recommended Flow
-
-```
-User → OAuth login
-      ↓
-OAuth provider (Google/GitHub)
-      ↓
-Backend callback
-      ↓
-Supabase user sync
-      ↓
-JWT issued
-      ↓
-Stored in HTTP-only cookie
-```
-
----
-
-### Cookie Setup (Important)
-
-```
-httpOnly: true
-secure: true (production)
-sameSite: "lax"
-```
-
-Prevents XSS token theft.
-
----
-
-# 🤖 5) AI Services Layer
-
-You use:
-
-- OpenAI
-- Groq
-- Gemini
-- Tensorflow
-- Natural NLP
-
-### Best Practice
-
-Route ALL AI calls through backend.
-
-```
-Frontend ❌ direct calls
-Backend ✅ calls AI
-```
-
-Why?
-
-- Hide API keys
-- Control usage
-- Add rate limits
-- Log costs
-
----
-
-### Add AI Cost Control
-
-Implement:
-
-✔ Request limits per user
-✔ Caching repeated prompts
-✔ Usage logging
-✔ Fallback models (Groq cheaper)
-
----
-
-# 📜 6) API Docs (Swagger)
-
-Host Swagger UI on:
-
-```
-/api-docs
-```
-
-Only enable publicly if needed.
-
-Better:
-
-```
-Protect with admin login
-```
-
----
-
-# 🌐 7) Domain & DNS Setup
-
-### Recommended structure
-
-```
-app.quizportal.com → Frontend
-api.quizportal.com → Backend
-```
-
-Benefits:
-
-- Cleaner CORS
-- Easier scaling
-- Better security rules
-
----
-
-# 🔒 8) Security Layer
-
-### Must Have
-
-✅ HTTPS everywhere
-✅ CORS restricted to frontend domain
-✅ Helmet.js in Express
-✅ Rate limiting
-✅ Input validation (Zod/Joi)
-✅ SQL injection protection (Supabase helps)
-
----
-
-# 📈 9) Monitoring, Logging & Observability
-
-### Current Implementation (SRE Setup):
-
-**Telemetry & Dashboards**
-
-- **Prometheus** (`http://localhost:9090`): Polling `prom-client` metrics natively out of the Node.js event loop
-- **Grafana Dashboard** (`http://localhost:3000` | Credentials: **`admin`** / **`admin`**): Real-time visualization charting HTTP Requests, 429 limits, and Redis socket health
-- **K6 Chaos Testing**: Dockerized load-testing suite (`load-test.js`) used to validate circuit-breaker resilience
-
-**SRE Infrastructure Controls (Local Dev Docker Environment)**
-
-- **Start/Stop Redis**: `docker start quiz-redis` / `docker stop quiz-redis`
-- **Start/Stop Grafana**: `docker start grafana` / `docker stop grafana`
-- **Start/Stop Prometheus**: `docker start prometheus` / `docker stop prometheus`
-
-**Logging**
-
-- Morgan / Winston (Debug streams via `server.js`)
-
-**Monitoring Add-ons (Future)**
-
-- Sentry (Centralized error traces)
-- UptimeRobot (Ping uptime)
-
----
-
-# 🚀 10) CI/CD Pipeline Overview
-
-### Frontend
-
-```
-Push → Test → Build → Deploy (Vercel)
-```
-
-### Backend
-
-```
-Push → Lint → Test → Security audit → Deploy
-```
-
----
-
-# 💡 Production-Level Extras (Highly Recommended)
-
-### ✔ CDN for assets
-
-Handled by Vercel.
-
----
-
-### ✔ API Rate Limiting
-
-Prevents abuse on:
-
-- AI endpoints
-- Auth routes
-
----
-
-### ✔ Background Jobs (BullMQ — IMPLEMENTED)
-
-For:
-
-- Code submission execution (Judge0)
-- AI-powered evaluation feedback
-
-Architecture:
-
-```
-User → POST /api/submit-async → BullMQ Queue → Worker → Judge0 + AI → Result
-User → GET /api/job/:jobId → Poll status (waiting/active/completed/failed)
-```
-
-Run worker separately:
-
-```bash
-node workers/submission.worker.js
-```
-
-Features:
-
-- 3 automatic retries with exponential backoff
-- Concurrency: 3 simultaneous jobs
-- Redis-backed persistence (survives server restarts)
-
----
-
-### ✔ Staging Environment
-
-```
-staging.quizportal.com
-```
-
-Test before production.
-
----
-
-# 🧠 Ideal Final Architecture (Simple View)
-
-```
-User
- ↓
-Vercel (React App)
- ↓
-Express Backend (Railway)
- ↓
-Supabase DB + Auth
- ↓
-AI Providers
-```
-
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-```
-
-Perfect — let’s do a **true click-by-click deployment guide** for your stack:
-
-> ✅ Frontend → **Vercel**
-> ✅ Backend → **Railway**
-> ✅ DB/Auth → **Supabase**
-> ✅ Code → GitHub repo
-
-No fluff. Just actionable steps.
-
----
-
-# 🚀 PART 0 — Pre-Deployment Checklist
-
-Make sure you have:
-
-✔ GitHub repo with `/frontend` and `/backend` folders
-✔ `.env` files ready (but NOT committed)
-✔ Supabase project created
-✔ OAuth credentials ready (Google/GitHub)
-
----
-
-# 🌍 PART 1 — Deploy Backend on Railway
-
----
-
-## ✅ Step 1 — Login
-
-1. Go to **railway.app**
-2. Click **Login**
-3. Choose **Login with GitHub**
-4. Authorize Railway
-
----
-
-## ✅ Step 2 — Create Project
-
-1. Click **New Project**
-2. Select **Deploy from GitHub Repo**
-3. Choose your repo
-4. Select the **backend folder**
-
----
-
-## ✅ Step 3 — Set Root Directory
-
-If backend is inside `/backend`:
-
-- Railway → Settings → Root Directory
-- Set:
-
-```
-backend
-```
-
----
-
-## ✅ Step 4 — Add Environment Variables
-
-Railway Dashboard:
-
-```
-Project → Variables → Add Variables
-```
-
-Add:
-
-```
-SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY
-JWT_SECRET
-OPENAI_API_KEY
-GROQ_API_KEY
-GOOGLE_CLIENT_ID
-GOOGLE_CLIENT_SECRET
-GITHUB_CLIENT_ID
-GITHUB_CLIENT_SECRET
-```
-
-Paste values from your local `.env`.
-
----
-
-## ✅ Step 5 — Deploy
-
-Railway auto-deploys.
-
-Wait until status shows:
-
-```
-✅ Deployed
-```
-
----
-
-## ✅ Step 6 — Get Backend URL
-
-Railway → Settings → Domains
-
-You’ll get:
-
-```
-https://your-app.up.railway.app
-```
-
-Copy this.
-
----
-
-# 🎨 PART 2 — Deploy Frontend on Vercel
-
----
-
-## ✅ Step 1 — Login
-
-1. Go to vercel.com
-2. Click **Sign Up**
-3. Choose **Continue with GitHub**
-
----
-
-## ✅ Step 2 — Import Project
-
-1. Click **Add New → Project**
-2. Import your GitHub repo
-3. Select the **frontend folder**
-
----
-
-## ✅ Step 3 — Configure Build
-
-Vercel usually auto-detects Vite.
-
-If not:
-
-```
-Framework: Vite
-Build Command: npm run build
-Output Directory: dist
-```
-
----
-
-## ✅ Step 4 — Add Frontend Env Variables
-
-Vercel → Project → Settings → Environment Variables
-
-Add:
-
-```
-VITE_API_URL = https://your-railway-url
-VITE_SUPABASE_URL
-VITE_SUPABASE_ANON_KEY
-```
-
----
-
-## ✅ Step 5 — Deploy
-
-Click **Deploy**
-
-Wait ~1–2 mins.
-
-You get:
-
-```
-https://your-app.vercel.app
-```
-
----
-
-# 🗄️ PART 3 — Configure Supabase
-
----
-
-## ✅ Step 1 — Allow Frontend Domain
-
-Supabase → Authentication → URL Configuration
-
-Add:
-
-```
-Site URL:
-https://your-vercel-app.vercel.app
-```
-
----
-
-## ✅ Step 2 — OAuth Redirect URLs
-
-Add:
-
-```
-https://your-backend-url/auth/google/callback
-https://your-backend-url/auth/github/callback
-```
-
----
-
-## ✅ Step 3 — Enable RLS
-
-Supabase → Table → Policies
-
-Enable Row Level Security for user tables.
-
----
-
-# 🔐 PART 4 — Setup OAuth
-
----
-
-## Google OAuth
-
-Go to Google Cloud Console:
-
-Authorized redirect URIs:
-
-```
-https://your-backend-url/auth/google/callback
-```
-
----
-
-## GitHub OAuth
-
-GitHub Developer Settings:
-
-Callback URL:
-
-```
-https://your-backend-url/auth/github/callback
-```
-
----
-
-# 🔒 PART 5 — Backend CORS Fix
-
-In Express:
-
-```js
-app.use(
-  cors({
-    origin: "https://your-vercel-app.vercel.app",
-    credentials: true,
-  }),
-);
-```
-
----
-
-# 🧪 PART 6 — Final Testing
-
-Test:
-
-✔ Signup/Login
-✔ Google OAuth
-✔ GitHub OAuth
-✔ Quiz generation
-✔ AI hints
-✔ DB saving
-✔ Swagger docs `/api-docs`
-
----
-
-# 🎉 DONE — You’re Live
-
-Architecture now:
-
-```
-Users
- ↓
-Vercel (Frontend)
- ↓
-Railway (Backend)
- ↓
-Supabase (DB/Auth)
- ↓
-AI APIs
-```
-
----
-
-# 💡 Pro Tips (Very Important)
-
-### ✅ Enable Auto Deploy
-
-Both Vercel & Railway auto deploy on push to `main`.
-
----
-
-### ✅ Add Custom Domain Later
-
-Example:
-
-```
-app.yoursite.com
-api.yoursite.com
-```
-
----
-
-### ✅ Monitor Errors
-
-Add:
-
-- Sentry
-- Railway logs
-
----
-
-If you want next, I can give:
-
-✅ Docker version of this setup
-✅ Cost optimization guide
-✅ Scaling to 10k users
-✅ CI/CD YAML templates ready-to-use
-
-Just say 👍
+- **Render does not provide fixed outbound IPs on the free tier.** Firewalling raw IPs in Azure NSG is therefore not feasible.
+- **Enforced Networking Strategy (Cloudflare Tunnel):**
+  - Run `cloudflared` on the Azure VM to establish an outbound connection to Cloudflare.
+  - The Render workers call Judge0 via the secured Cloudflare-proxied hostname (e.g., `https://judge0.your-domain.com`).
+  - **No inbound ports (including 2358) are opened on the Azure NSG** to the public internet, eliminating public port-scanning and brute-force risks on the sandbox.
+  - Authentication headers/keys (`JUDGE0_API_KEY`) must still be passed to secure the Cloudflare endpoint routing.
