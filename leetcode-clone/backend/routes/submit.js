@@ -68,7 +68,9 @@ const evaluateJudgeCase = (result, tc, visibilityLabel) => {
     return null;
 };
 
-router.post("/submit", auth, async (req, res) => {
+const { aiLimiter } = require("../middleware/rateLimiter");
+
+router.post("/submit", auth, aiLimiter, async (req, res) => {
     const { code, language, questionId } = req.body;
     const normalizedLanguage = normalizeLanguage(language);
     const q = questions[questionId];
@@ -188,7 +190,7 @@ router.post("/submit", auth, async (req, res) => {
 });
 
 // ========== ASYNC SUBMISSION (BullMQ) ==========
-router.post("/submit-async", auth, async (req, res) => {
+router.post("/submit-async", auth, aiLimiter, async (req, res) => {
     const { code, language, questionId, executionId } = req.body;
     const mode = req.query.mode === "run" ? "run" : "submit";
     const normalizedLanguage = normalizeLanguage(language);

@@ -27,6 +27,12 @@ const io = new Server(server, {
     }
 });
 
+const { createAdapter } = require("@socket.io/redis-adapter");
+const redisClient = require("./config/redis");
+const pubClient = redisClient;
+const subClient = pubClient.duplicate();
+io.adapter(createAdapter(pubClient, subClient));
+
 app.set("io", io);
 
 io.on("connection", (socket) => {
@@ -86,6 +92,8 @@ app.use((req, res, next) => {
     console.log(`[REQUEST] ${req.method} ${req.url} `);
     next();
 });
+
+app.get("/health", (req, res) => res.status(200).send("OK"));
 
 app.use("/api/teacher", auth, authorize('teacher'), teacherRoutes);
 app.use("/api/student", studentRoutes);

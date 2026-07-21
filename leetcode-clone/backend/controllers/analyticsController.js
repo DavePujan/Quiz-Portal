@@ -45,6 +45,48 @@ function getIntegrityBand(score) {
   return "Safe";
 }
 
+// Student visibility for teachers is based on the active institutional
+// membership, never on the legacy free-text profiles.department value.
+function getTeacherDepartmentScope(req) {
+  const scope = req.context;
+  if (!scope?.userId || !scope?.institutionId || !scope?.departmentId) {
+    const error = new Error("An active teacher department assignment is required.");
+    error.status = 403;
+    throw error;
+  }
+  return scope;
+}
+
+function sameDepartmentStudentPredicate(profileAlias = "p") {
+  return `
+    EXISTS (
+      SELECT 1
+      FROM institution_memberships student_membership
+      WHERE student_membership.user_id = ${profileAlias}.id
+        AND student_membership.is_active = true
+        AND student_membership.role = 'student'
+        AND student_membership.institution_id = $3
+        AND student_membership.department_id = $2
+    )`;
+}
+
+async function assertTeacherCanAccessQuiz(quizId, teacherId) {
+  const result = await pool.query(`
+    SELECT 1
+    FROM quizzes q
+    LEFT JOIN course_offerings co ON co.id = q.course_offering_id
+    WHERE q.id = $1
+      AND (co.teacher_id = $2 OR q.created_by = $2)
+    LIMIT 1;
+  `, [quizId, teacherId]);
+
+  if (result.rowCount === 0) {
+    const error = new Error("Quiz not found or access denied.");
+    error.status = 404;
+    throw error;
+  }
+}
+
 async function getTopicNameById(topicId) {
   const numericId = Number(topicId);
   if (!Number.isFinite(numericId)) return "Other";
@@ -198,18 +240,10 @@ const getQuizAnalytics = async (req, res) => {
 
   try {
     await ensureProfileEnrollmentColumn();
+    const scope = getTeacherDepartmentScope(req);
+    await assertTeacherCanAccessQuiz(quizId, scope.userId);
 
-    const teacherEmail = req.user?.email;
-    let teacherDept = null;
-    if (teacherEmail) {
-      const teacherResult = await pool.query(
-        "SELECT department FROM profiles WHERE email = $1 LIMIT 1",
-        [teacherEmail]
-      );
-      teacherDept = teacherResult.rows[0]?.department || null;
-    }
-
-    const cacheKey = `analytics:teacher:quiz:${quizId}:${teacherDept || 'no-dept'}:ai-v2`;
+    const cacheKey = `analytics:teacher:quiz:${quizId}:institution:${scope.institutionId}:department:${scope.departmentId}:ai-v3`;
 
     if (redisClient.isAvailable) {
       const cached = await redisClient.get(cacheKey);
@@ -291,9 +325,9 @@ const getQuizAnalytics = async (req, res) => {
       LEFT JOIN profiles p ON p.id = qa.user_id
       WHERE qa.quiz_id = $1
         AND qa.status IN ('submitted', 'evaluated')
-        AND p.department = $2;
+        AND ${sameDepartmentStudentPredicate("p")};
     `;
-    const overviewResult = await pool.query(overviewQuery, [quizId, teacherDept || ""]);
+    const overviewResult = await pool.query(overviewQuery, [quizId, scope.departmentId, scope.institutionId]);
 
     /* --------------------------------
        2. SCORE DISTRIBUTION (Percentage Based)
@@ -320,11 +354,11 @@ const getQuizAnalytics = async (req, res) => {
       LEFT JOIN profiles p ON p.id = qa.user_id
       WHERE qa.quiz_id = $1
         AND qa.status IN ('submitted', 'evaluated')
-        AND p.department = $2
+        AND ${sameDepartmentStudentPredicate("p")}
       GROUP BY bucket
       ORDER BY bucket;
     `;
-    const scoreDistResult = await pool.query(scoreDistQuery, [quizId, teacherDept || ""]);
+    const scoreDistResult = await pool.query(scoreDistQuery, [quizId, scope.departmentId, scope.institutionId]);
 
     // Fill missing buckets for cleaner chart
     const fullBuckets = [];
@@ -359,13 +393,13 @@ const getQuizAnalytics = async (req, res) => {
         LEFT JOIN profiles p ON p.id = qa2.user_id
         WHERE qa2.quiz_id = $1
           AND qa2.status IN ('submitted', 'evaluated')
-          AND p.department = $2
+          AND ${sameDepartmentStudentPredicate("p")}
       )
       GROUP BY q.id, q.title, q.type;
     `;
     const questionDifficultyResult = await pool.query(
       questionDifficultyQuery,
-      [quizId, teacherDept || ""]
+      [quizId, scope.departmentId, scope.institutionId]
     );
 
     const enrichedQuestionDifficulty = await enrichQuestionsWithAI(questionDifficultyResult.rows);
@@ -402,11 +436,11 @@ const getQuizAnalytics = async (req, res) => {
       LEFT JOIN quiz_marks qm ON qm.quiz_id = qa.quiz_id
       WHERE qa.quiz_id = $1
         AND qa.status IN ('submitted', 'evaluated')
-        AND p.department = $2
+        AND ${sameDepartmentStudentPredicate("p")}
       ORDER BY score DESC
       LIMIT 5;
     `;
-    const topStudentsResult = await pool.query(topStudentsQuery, [quizId, teacherDept || ""]);
+    const topStudentsResult = await pool.query(topStudentsQuery, [quizId, scope.departmentId, scope.institutionId]);
 
     /* --------------------------------
        3.6 LIVE ACTIVITY (STRICTLY for live quizzes)
@@ -420,7 +454,7 @@ const getQuizAnalytics = async (req, res) => {
         WHERE qa.quiz_id = $1
           AND qa.status IN ('submitted', 'evaluated')
           AND qa.submitted_at >= NOW() - INTERVAL '10 minutes'
-          AND p.department = $2;
+          AND ${sameDepartmentStudentPredicate("p")};
       `;
 
       const recentSubmissionsQuery = `
@@ -430,7 +464,7 @@ const getQuizAnalytics = async (req, res) => {
         WHERE qa.quiz_id = $1
           AND qa.status IN ('submitted', 'evaluated')
           AND qa.submitted_at >= NOW() - INTERVAL '5 minutes'
-          AND p.department = $2;
+          AND ${sameDepartmentStudentPredicate("p")};
       `;
 
       const avgTimePerQuestionQuery = `
@@ -454,13 +488,13 @@ const getQuizAnalytics = async (req, res) => {
         ) ans_cnt ON ans_cnt.attempt_id = qa.id
         WHERE qa.quiz_id = $1
           AND qa.status IN ('submitted', 'evaluated')
-          AND p.department = $2;
+          AND ${sameDepartmentStudentPredicate("p")};
       `;
 
       const [activeStudentsResult, recentSubmissionsResult, avgTimePerQuestionResult] = await Promise.all([
-        pool.query(activeStudentsQuery, [quizId, teacherDept || ""]),
-        pool.query(recentSubmissionsQuery, [quizId, teacherDept || ""]),
-        pool.query(avgTimePerQuestionQuery, [quizId, teacherDept || ""])
+        pool.query(activeStudentsQuery, [quizId, scope.departmentId, scope.institutionId]),
+        pool.query(recentSubmissionsQuery, [quizId, scope.departmentId, scope.institutionId]),
+        pool.query(avgTimePerQuestionQuery, [quizId, scope.departmentId, scope.institutionId])
       ]);
 
       const avgTimeValue = avgTimePerQuestionResult.rows[0]?.avg_time;
@@ -576,9 +610,10 @@ const getQuizAnalytics = async (req, res) => {
         FROM exam_behavior_logs l
         LEFT JOIN profiles p ON p.id = l.user_id
         WHERE l.quiz_id = $1
+          AND ${sameDepartmentStudentPredicate("p")}
         ORDER BY l.final_score DESC, l.updated_at DESC;
       `;
-      const integrityResult = await pool.query(integrityQuery, [quizId]);
+      const integrityResult = await pool.query(integrityQuery, [quizId, scope.departmentId, scope.institutionId]);
       integrityReport = integrityResult.rows;
     } catch (integrityErr) {
       integrityReport = [];
@@ -651,10 +686,10 @@ const getQuizAnalytics = async (req, res) => {
       LEFT JOIN latest_integrity li ON li.attempt_id = qa.id
       WHERE qa.quiz_id = $1
         AND qa.status IN ('submitted', 'evaluated')
-        AND p.department = $2
+        AND ${sameDepartmentStudentPredicate("p")}
       ORDER BY percentage DESC, marks DESC;
     `;
-    const studentReportResult = await pool.query(studentReportQuery, [quizId, teacherDept || ""]);
+    const studentReportResult = await pool.query(studentReportQuery, [quizId, scope.departmentId, scope.institutionId]);
 
     const studentReport = studentReportResult.rows.map((row) => {
       const pct = Number(row.percentage || 0);
@@ -737,7 +772,7 @@ const getQuizAnalytics = async (req, res) => {
 
   } catch (error) {
     console.error("Analytics error:", error);
-    res.status(500).json({ error: "Failed to fetch analytics" });
+    res.status(error.status || 500).json({ error: error.message || "Failed to fetch analytics" });
   }
 };
 
@@ -746,16 +781,8 @@ const exportQuizAnalyticsCsv = async (req, res) => {
 
   try {
     await ensureProfileEnrollmentColumn();
-
-    const teacherEmail = req.user?.email;
-    let teacherDept = null;
-    if (teacherEmail) {
-      const teacherResult = await pool.query(
-        "SELECT department FROM profiles WHERE email = $1 LIMIT 1",
-        [teacherEmail]
-      );
-      teacherDept = teacherResult.rows[0]?.department || null;
-    }
+    const scope = getTeacherDepartmentScope(req);
+    await assertTeacherCanAccessQuiz(quizId, scope.userId);
 
     const quizMetaQuery = `
       SELECT id, title, COALESCE(subject, 'General') AS subject, COALESCE(department, '-') AS department, COALESCE(semester, '-') AS semester
@@ -833,11 +860,11 @@ const exportQuizAnalyticsCsv = async (req, res) => {
       LEFT JOIN latest_integrity li ON li.attempt_id = qa.id
       WHERE qa.quiz_id = $1
         AND qa.status IN ('submitted', 'evaluated')
-        AND p.department = $2
+        AND ${sameDepartmentStudentPredicate("p")}
       ORDER BY percentage DESC, marks DESC;
     `;
 
-    const rowsResult = await pool.query(exportQuery, [quizId, teacherDept || ""]);
+    const rowsResult = await pool.query(exportQuery, [quizId, scope.departmentId, scope.institutionId]);
 
     const lines = [];
     lines.push(`Department,${csvCell(quizMeta.department)}`);
@@ -904,7 +931,7 @@ const exportQuizAnalyticsCsv = async (req, res) => {
     return res.status(200).send(csv);
   } catch (error) {
     console.error("Analytics export error:", error);
-    return res.status(500).json({ error: "Failed to export analytics report" });
+    return res.status(error.status || 500).json({ error: error.message || "Failed to export analytics report" });
   }
 };
 

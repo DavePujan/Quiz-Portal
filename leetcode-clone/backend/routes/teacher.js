@@ -239,10 +239,42 @@ async function ensureProfileEnrollmentColumn() {
     `);
 }
 
+function getTeacherDepartmentScope(req) {
+    const scope = req.context;
+    if (!scope?.institutionId || !scope?.departmentId) {
+        const error = new Error("An active teacher department assignment is required.");
+        error.status = 403;
+        throw error;
+    }
+    return scope;
+}
+
+async function assertAttemptIsInTeacherDepartment(attemptId, scope) {
+    const result = await pool.query(`
+        SELECT 1
+        FROM quiz_attempts qa
+        JOIN institution_memberships student_membership
+          ON student_membership.user_id = qa.user_id
+         AND student_membership.is_active = true
+         AND student_membership.role = 'student'
+         AND student_membership.institution_id = $3
+         AND student_membership.department_id = $2
+        WHERE qa.id = $1
+        LIMIT 1
+    `, [attemptId, scope.departmentId, scope.institutionId]);
+
+    if (result.rowCount === 0) {
+        const error = new Error("Evaluation not found or access denied.");
+        error.status = 404;
+        throw error;
+    }
+}
+
 // Dashboard Stats
 router.get("/dashboard", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
     try {
         const userId = req.context.userId;
+        const scope = getTeacherDepartmentScope(req);
 
         // Fetch institution and department names
         const orgResult = await pool.query(`
@@ -252,23 +284,19 @@ router.get("/dashboard", auth, authorize('teacher'), requireInstitutionContext, 
             FROM institution_memberships im
             LEFT JOIN institutions i ON i.id = im.institution_id
             LEFT JOIN departments d ON d.id = im.department_id
-            WHERE im.user_id = $1 AND im.is_active = true
+            WHERE im.user_id = $1
+              AND im.is_active = true
+              AND im.role = 'teacher'
+              AND im.institution_id = $2
+              AND im.department_id = $3
             LIMIT 1
-        `, [userId]);
+        `, [userId, scope.institutionId, scope.departmentId]);
 
         let collegeName = orgResult.rows[0]?.institution_name || "QuizPortal Institute";
         let departmentName = orgResult.rows[0]?.department_name;
 
-        // Fetch teacher's department for legacy/fallback
-        const { data: teacherProfile } = await supabase
-            .from("profiles")
-            .select("department")
-            .ilike("email", req.user.email)
-            .single();
-
-        const teacherDept = teacherProfile?.department;
         if (!departmentName) {
-            departmentName = teacherDept || "Computer Science";
+            return res.status(403).json({ error: "Teacher department could not be resolved." });
         }
 
         const { count: quizCount, error: quizError } = await supabase
@@ -280,29 +308,29 @@ router.get("/dashboard", auth, authorize('teacher'), requireInstitutionContext, 
         let pendingCount = 0;
         let studentCount = 0;
 
-        const resolvedDeptFilter = teacherDept || departmentName;
-
-        if (resolvedDeptFilter) {
-            // Count pending attempts from students in the teacher's department
-            const { count: pCount, error: pendingError } = await supabase
-                .from("quiz_attempts")
-                .select("id, profiles!inner(department)", { count: 'exact', head: true })
-                .eq("status", "submitted")
-                .eq("profiles.department", resolvedDeptFilter);
-
-            if (pendingError) throw pendingError;
-            pendingCount = pCount || 0;
-
-            // Count students in the teacher's department
-            const { count: sCount, error: studentError } = await supabase
-                .from("profiles")
-                .select("id", { count: 'exact', head: true })
-                .eq("role", "student")
-                .eq("department", resolvedDeptFilter);
-
-            if (studentError) throw studentError;
-            studentCount = sCount || 0;
-        }
+        const [pendingResult, studentsResult] = await Promise.all([
+            pool.query(`
+                SELECT COUNT(*) AS count
+                FROM quiz_attempts qa
+                JOIN institution_memberships student_membership
+                  ON student_membership.user_id = qa.user_id
+                 AND student_membership.is_active = true
+                 AND student_membership.role = 'student'
+                 AND student_membership.institution_id = $2
+                 AND student_membership.department_id = $1
+                WHERE qa.status = 'submitted'
+            `, [scope.departmentId, scope.institutionId]),
+            pool.query(`
+                SELECT COUNT(DISTINCT student_membership.user_id) AS count
+                FROM institution_memberships student_membership
+                WHERE student_membership.is_active = true
+                  AND student_membership.role = 'student'
+                  AND student_membership.institution_id = $2
+                  AND student_membership.department_id = $1
+            `, [scope.departmentId, scope.institutionId])
+        ]);
+        pendingCount = Number(pendingResult.rows[0]?.count || 0);
+        studentCount = Number(studentsResult.rows[0]?.count || 0);
 
         res.json({
             active: quizCount || 0,
@@ -314,7 +342,7 @@ router.get("/dashboard", auth, authorize('teacher'), requireInstitutionContext, 
         });
     } catch (err) {
         console.error("Dashboard Stats Error:", err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
@@ -399,73 +427,58 @@ router.post("/quiz/:id/end", auth, authorize('teacher'), async (req, res) => {
 });
 
 // Evaluations
-router.get("/evaluations", auth, authorize('teacher'), async (req, res) => {
+router.get("/evaluations", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
     try {
         await ensureProfileEnrollmentColumn();
-
-        // Get teacher's department
-        const { data: teacherProfile } = await supabase
-            .from("profiles")
-            .select("department")
-            .ilike("email", req.user.email)
-            .single();
-
-        const teacherDept = teacherProfile?.department;
-
-        if (!teacherDept) {
-            return res.json([]);
-        }
-
-        const { data, error } = await supabase
-            .from("quiz_attempts")
-            .select(`
-                id,
-                score,
-                status,
-                profiles!inner(email, full_name, enrollment_no, department),
-                quizzes(title)
-            `)
-            .eq("status", "submitted")
-            .eq("profiles.department", teacherDept);
-
-        if (error) throw error;
+        const scope = getTeacherDepartmentScope(req);
+        const result = await pool.query(`
+            SELECT
+                qa.id,
+                qa.score,
+                qa.status,
+                p.email,
+                p.full_name,
+                p.enrollment_no,
+                q.title AS quiz_title
+            FROM quiz_attempts qa
+            JOIN profiles p ON p.id = qa.user_id
+            JOIN quizzes q ON q.id = qa.quiz_id
+            JOIN institution_memberships student_membership
+              ON student_membership.user_id = p.id
+             AND student_membership.is_active = true
+             AND student_membership.role = 'student'
+             AND student_membership.institution_id = $2
+             AND student_membership.department_id = $1
+            WHERE qa.status = 'submitted'
+            ORDER BY qa.completed_at DESC NULLS LAST, qa.started_at DESC NULLS LAST
+        `, [scope.departmentId, scope.institutionId]);
 
         // Transform for frontend
-        const formatted = data.map(item => ({
+        const formatted = result.rows.map(item => ({
             id: item.id,
-            student: item.profiles?.full_name || item.profiles?.email || "Unknown",
-            enrollmentNo: item.profiles?.enrollment_no || "-",
-            email: item.profiles?.email || "-",
-            quiz: item.quizzes?.title || "Unknown",
+            student: item.full_name || item.email || "Unknown",
+            enrollmentNo: item.enrollment_no || "-",
+            email: item.email || "-",
+            quiz: item.quiz_title || "Unknown",
             status: item.status
         }));
 
         res.json(formatted);
     } catch (err) {
         console.error("Fetch Evaluations Error:", err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
 // Single Evaluation Details
-router.get("/evaluation/:id", auth, authorize('teacher'), async (req, res) => {
+router.get("/evaluation/:id", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
     try {
         await ensureProfileEnrollmentColumn();
 
         const { id } = req.params;
 
-        // Get teacher's department
-        const { data: teacherProfile } = await supabase
-            .from("profiles")
-            .select("department")
-            .ilike("email", req.user.email)
-            .single();
-
-        const teacherDept = teacherProfile?.department;
-
-        if (!teacherDept) {
-            return res.status(404).json({ error: "Evaluation not found or access denied" });
-        }
+        const scope = getTeacherDepartmentScope(req);
+        await assertAttemptIsInTeacherDepartment(id, scope);
 
         // Fetch Attempt
         const { data: attempt, error: attemptError } = await supabase
@@ -484,7 +497,6 @@ router.get("/evaluation/:id", auth, authorize('teacher'), async (req, res) => {
                 quizzes(title, duration)
             `)
             .eq("id", id)
-            .eq("profiles.department", teacherDept)
             .single();
 
         if (attemptError) throw attemptError;
@@ -576,15 +588,21 @@ router.get("/evaluation/:id", auth, authorize('teacher'), async (req, res) => {
 
     } catch (err) {
         console.error("Fetch Single Evaluation Error:", err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
 // Finalize Evaluation (Update marks and status)
-router.post("/evaluation/:id/finalize", auth, authorize('teacher'), async (req, res) => {
+router.post("/evaluation/:id/finalize", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
     try {
         const { id } = req.params;
         const { marks } = req.body; // Array of { questionId, marks, isCorrect }
+        const scope = getTeacherDepartmentScope(req);
+        await assertAttemptIsInTeacherDepartment(id, scope);
+
+        if (!Array.isArray(marks)) {
+            return res.status(400).json({ error: "marks must be an array." });
+        }
 
         // 1. Update individual answers
         for (const m of marks) {
@@ -615,7 +633,7 @@ router.post("/evaluation/:id/finalize", auth, authorize('teacher'), async (req, 
         res.json({ message: "Evaluation finalized", totalScore });
     } catch (err) {
         console.error("Finalize Evaluation Error:", err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
@@ -998,10 +1016,12 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
 });
 
 // Auto-Evaluate Attempt
-router.post("/evaluate/:id", auth, authorize('teacher'), aiLimiter, async (req, res) => {
+router.post("/evaluate/:id", auth, authorize('teacher'), requireInstitutionContext, aiLimiter, async (req, res) => {
     try {
         const { id } = req.params;
         const { provider = "gemini", model } = req.body;
+        const scope = getTeacherDepartmentScope(req);
+        await assertAttemptIsInTeacherDepartment(id, scope);
         await ensureQuestionFunctionNameColumn();
 
         console.log("AI Evaluate: Fetching key for provider", provider);
@@ -1158,7 +1178,7 @@ router.post("/evaluate/:id", auth, authorize('teacher'), aiLimiter, async (req, 
 
     } catch (err) {
         console.error("Auto-Evaluation Error:", err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 

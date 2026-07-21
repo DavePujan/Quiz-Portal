@@ -7,6 +7,7 @@ const {
     getStudentRecommendationsV2
 } = require("../controllers/analyticsController");
 const { auth, authorize } = require("../middleware/auth");
+const { requireInstitutionContext } = require("../middleware/institution");
 
 const router = express.Router();
 
@@ -14,6 +15,7 @@ router.get(
     "/teacher/quiz/:quizId",
     auth,
     authorize('teacher'),
+    requireInstitutionContext,
     getQuizAnalytics
 );
 
@@ -21,6 +23,7 @@ router.get(
     "/teacher/quiz/:quizId/export",
     auth,
     authorize('teacher'),
+    requireInstitutionContext,
     exportQuizAnalyticsCsv
 );
 

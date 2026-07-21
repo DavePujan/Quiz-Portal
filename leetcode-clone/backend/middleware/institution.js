@@ -39,9 +39,11 @@ const requireInstitutionContext = async (req, res, next) => {
         const result = await pool.query(`
             SELECT institution_id, role, department_id, program_id
             FROM institution_memberships
-            WHERE user_id = $1 AND is_active = true
+            WHERE user_id = $1
+              AND is_active = true
+              AND role = $2
             LIMIT 1
-        `, [userId]);
+        `, [userId, req.user.role]);
 
         const membership = result.rows[0];
 
