@@ -95,6 +95,7 @@ app.use((req, res, next) => {
     next();
 });
 
+app.get("/", (req, res) => res.status(200).json({ status: "OK", message: "QuizPortal Backend API Running" }));
 app.get("/health", (req, res) => res.status(200).send("OK"));
 
 app.use("/api/teacher", auth, authorize('teacher'), teacherRoutes);
