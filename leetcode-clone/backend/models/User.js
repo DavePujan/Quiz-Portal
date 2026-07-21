@@ -2,7 +2,7 @@ const users = [
     {
         id: 1,
         email: "teacher@test.com",
-        password: "$2b$10$DHpOtH1eSROzewp8bQjFt..aSCsvy9GrInyHi6CXZUM8JCm6ROySq", // password: "password"
+        password: "$2b$10$fD/NMKGz/zrHJqZSq/eJxus4WrZM2tPXMIJTX9OjA/Vofz4sbY3kS", // password: "password"
         role: "teacher",
         provider: "local",
         isVerified: true
@@ -10,7 +10,7 @@ const users = [
     {
         id: 2,
         email: "student@test.com",
-        password: "$2b$10$DHpOtH1eSROzewp8bQjFt..aSCsvy9GrInyHi6CXZUM8JCm6ROySq", // password: "password"
+        password: "$2b$10$fD/NMKGz/zrHJqZSq/eJxus4WrZM2tPXMIJTX9OjA/Vofz4sbY3kS", // password: "password"
         role: "student",
         provider: "local",
         isVerified: true
@@ -18,7 +18,7 @@ const users = [
     {
         id: 3,
         email: "admin@test.com",
-        password: "$2b$10$DHpOtH1eSROzewp8bQjFt..aSCsvy9GrInyHi6CXZUM8JCm6ROySq", // password: "password"
+        password: "$2b$10$fD/NMKGz/zrHJqZSq/eJxus4WrZM2tPXMIJTX9OjA/Vofz4sbY3kS", // password: "password"
         role: "admin",
         provider: "local",
         isVerified: true
@@ -26,7 +26,7 @@ const users = [
     {
         id: 4,
         email: "master@test.com",
-        password: "$2b$10$DHpOtH1eSROzewp8bQjFt..aSCsvy9GrInyHi6CXZUM8JCm6ROySq", // password: "password"
+        password: "$2b$10$fD/NMKGz/zrHJqZSq/eJxus4WrZM2tPXMIJTX9OjA/Vofz4sbY3kS", // password: "password"
         role: "master_admin",
         provider: "local",
         isVerified: true
