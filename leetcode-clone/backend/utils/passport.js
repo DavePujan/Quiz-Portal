@@ -64,8 +64,24 @@ passport.use(
                         };
                         User.push(user);
                     } else {
-                        // Really not found
-                        return done(null, false, { message: "User not found", email: email, provider: "google" });
+                        // Auto-provision new OAuth user as student
+                        const name = profile.displayName || email.split("@")[0];
+                        const { data: newSbUser } = await supabase.from("profiles").insert({
+                            email,
+                            name,
+                            role: "student",
+                            provider: "google",
+                            is_verified: true
+                        }).select("*").maybeSingle();
+
+                        user = {
+                            id: newSbUser?.id || Date.now(),
+                            email,
+                            role: newSbUser?.role || "student",
+                            provider: "google",
+                            isVerified: true
+                        };
+                        User.push(user);
                     }
                 }
 
@@ -105,7 +121,24 @@ passport.use(
                         };
                         User.push(user);
                     } else {
-                        return done(null, false, { message: "User not found", email: email, provider: "github" });
+                        // Auto-provision new OAuth user as student
+                        const name = profile.displayName || profile.username || email.split("@")[0];
+                        const { data: newSbUser } = await supabase.from("profiles").insert({
+                            email,
+                            name,
+                            role: "student",
+                            provider: "github",
+                            is_verified: true
+                        }).select("*").maybeSingle();
+
+                        user = {
+                            id: newSbUser?.id || Date.now(),
+                            email,
+                            role: newSbUser?.role || "student",
+                            provider: "github",
+                            isVerified: true
+                        };
+                        User.push(user);
                     }
                 }
 
