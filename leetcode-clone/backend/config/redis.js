@@ -27,8 +27,8 @@ if (IS_TEST) {
 
     // Gracefully handles raw REDIS_URL string vs configuration object
     const redisClient = process.env.REDIS_URL
-        ? new Redis(process.env.REDIS_URL, { retryStrategy, maxRetriesPerRequest: 3 })
-        : new Redis({ host: '127.0.0.1', port: 6379, retryStrategy, maxRetriesPerRequest: 3 });
+        ? new Redis(process.env.REDIS_URL, { retryStrategy, maxRetriesPerRequest: null })
+        : new Redis({ host: '127.0.0.1', port: 6379, retryStrategy, maxRetriesPerRequest: null });
     redisClient.isAvailable = false;
 
     redisClient.on('ready', () => {
