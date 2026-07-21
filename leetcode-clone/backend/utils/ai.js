@@ -59,7 +59,7 @@ async function generateOpenRouterResponse(prompt, apiKey, { isJson = true, model
         apiKey: apiKey,
         timeout: 120000, // 2 minute timeout for free models
         defaultHeaders: {
-            "HTTP-Referer": "http://localhost:5173",
+            "HTTP-Referer": process.env.CLIENT_URL || "http://localhost:5173",
             "X-Title": "Quiz Portal"
         }
     });

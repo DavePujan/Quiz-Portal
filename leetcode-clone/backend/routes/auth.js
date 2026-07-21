@@ -8,6 +8,7 @@ const crypto = require("crypto");
 
 const passport = require("passport");
 const REFRESH_SECRET = process.env.REFRESH_SECRET || "refreshsecret123";
+const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
 const AccessRequest = require("../models/AccessRequest");
 const { loginLimiter } = require("../middleware/rateLimiter");
@@ -193,15 +194,19 @@ router.get("/google/callback", (req, res, next) => {
             // User not found, redirect to request access with email pre-filled
             // Info contains { message, email, provider }
             const email = info?.email || "";
-            return res.redirect(`http://localhost:5173/login?error=not_found&email=${email}&provider=google`);
+            return res.redirect(`${CLIENT_URL}/login?error=not_found&email=${email}&provider=google`);
         }
 
         // Success
         const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
         const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "7d" });
 
-        res.cookie("refreshToken", refreshToken, { httpOnly: true, secure: false, sameSite: "strict" });
-        res.redirect(`http://localhost:5173/oauth-success?token=${token}&role=${user.role}`);
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
+        });
+        res.redirect(`${CLIENT_URL}/oauth-success?token=${token}&role=${user.role}`);
     })(req, res, next);
 });
 
@@ -211,14 +216,18 @@ router.get("/github/callback", (req, res, next) => {
         if (err) return next(err);
         if (!user) {
             const email = info?.email || "";
-            return res.redirect(`http://localhost:5173/login?error=not_found&email=${email}&provider=github`);
+            return res.redirect(`${CLIENT_URL}/login?error=not_found&email=${email}&provider=github`);
         }
 
         const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
         const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "7d" });
 
-        res.cookie("refreshToken", refreshToken, { httpOnly: true, secure: false, sameSite: "strict" });
-        res.redirect(`http://localhost:5173/oauth-success?token=${token}&role=${user.role}`);
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
+        });
+        res.redirect(`${CLIENT_URL}/oauth-success?token=${token}&role=${user.role}`);
     })(req, res, next);
 });
 
