@@ -62,5 +62,15 @@ if (IS_TEST) {
         if (redisStatus) redisStatus.set(0);
     });
 
+    redisClient.duplicateClient = () => {
+        const dup = redisClient.duplicate();
+        dup.on('error', (err) => {
+            if (dup.status !== 'reconnecting') {
+                console.error('[Redis Client] Connection Error:', err.message);
+            }
+        });
+        return dup;
+    };
+
     module.exports = redisClient;
 }

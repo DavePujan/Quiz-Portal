@@ -29,9 +29,11 @@ const io = new Server(server, {
 
 const { createAdapter } = require("@socket.io/redis-adapter");
 const redisClient = require("./config/redis");
-const pubClient = redisClient;
-const subClient = pubClient.duplicate();
-io.adapter(createAdapter(pubClient, subClient));
+if (redisClient.duplicateClient) {
+    const pubClient = redisClient.duplicateClient();
+    const subClient = redisClient.duplicateClient();
+    io.adapter(createAdapter(pubClient, subClient));
+}
 
 app.set("io", io);
 
