@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import axios from "axios";
 import { AuthContext } from "./authStore";
+import { API_BASE_URL } from "../config/api";
 
 export function AuthProvider({ children }) {
     // Actual access token lives in HttpOnly cookie — this is a backward-compatible flag
@@ -22,7 +23,7 @@ export function AuthProvider({ children }) {
     const logout = async () => {
         try {
             // Tell backend to explicitly purge both token cookies
-            await axios.post("http://localhost:5000/auth/logout", {}, { withCredentials: true });
+            await axios.post(`${API_BASE_URL}/auth/logout`, {}, { withCredentials: true });
         } catch (e) {
             console.warn("Logout request failed:", e);
         }
@@ -38,7 +39,7 @@ export function AuthProvider({ children }) {
         const validateSession = async () => {
             try {
                 // If refresh works, session cookies are still valid.
-                await axios.post("http://localhost:5000/auth/refresh", {}, { withCredentials: true });
+                await axios.post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true });
             } catch {
                 // Stale local role can cause redirect loops between /login and protected routes.
                 localStorage.removeItem("role");
@@ -58,7 +59,7 @@ export function AuthProvider({ children }) {
                 return;
             }
             try {
-                const res = await axios.get("http://localhost:5000/auth/profile", { withCredentials: true });
+                const res = await axios.get(`${API_BASE_URL}/auth/profile`, { withCredentials: true });
                 setProfile(res.data);
             } catch (err) {
                 console.error("Failed to fetch detailed profile:", err);

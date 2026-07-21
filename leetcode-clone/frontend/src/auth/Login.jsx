@@ -2,6 +2,7 @@ import { useState, useContext, useEffect } from "react";
 import { AuthContext } from "../context/authStore";
 import axios from "axios";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { API_BASE_URL } from "../config/api";
 // import { LogIn, Github, Mail } from "lucide-react"; // Removed: Using inline SVGs instead
 
 
@@ -47,7 +48,7 @@ export default function Login() {
 
     async function submit() {
         try {
-            const res = await axios.post("http://localhost:5000/auth/login", {
+            const res = await axios.post(`${API_BASE_URL}/auth/login`, {
                 email,
                 password
             }, { withCredentials: true });
@@ -157,14 +158,14 @@ export default function Login() {
 
                     <div className="grid grid-cols-2 gap-4">
                         <button
-                            onClick={() => window.location.href = "http://localhost:5000/auth/google"}
+                            onClick={() => window.location.href = `${API_BASE_URL}/auth/google`}
                             className="flex items-center justify-center gap-2 bg-[#252526] hover:bg-[#2d2d2d] text-white py-3 rounded-lg border border-gray-700 transition"
                         >
                             <GoogleIcon />
                             <span>Google</span>
                         </button>
                         <button
-                            onClick={() => window.location.href = "http://localhost:5000/auth/github"}
+                            onClick={() => window.location.href = `${API_BASE_URL}/auth/github`}
                             className="flex items-center justify-center gap-2 bg-[#252526] hover:bg-[#2d2d2d] text-white py-3 rounded-lg border border-gray-700 transition"
                         >
                             <GithubIcon />

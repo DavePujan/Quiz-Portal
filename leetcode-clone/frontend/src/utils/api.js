@@ -1,8 +1,9 @@
 import axios from "axios";
+import { API_BASE_URL } from "../config/api";
 
 // Create an axios instance to handle interceptors better
 const api = axios.create({
-    baseURL: "http://localhost:5000",
+    baseURL: API_BASE_URL,
     withCredentials: true // For sending cookies
 });
 
@@ -25,7 +26,7 @@ api.interceptors.response.use(
             originalRequest._retry = true;
             try {
                 // The backend will automatically set the new accessToken HTTP-Only cookie in the response
-                await axios.post("http://localhost:5000/auth/refresh", {}, { withCredentials: true });
+                await axios.post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true });
 
                 // Retry original request, cookies are automatically sent withCredentials
                 return api(originalRequest);

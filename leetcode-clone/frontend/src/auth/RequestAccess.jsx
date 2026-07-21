@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import api from "../utils/api";
+import { API_BASE_URL } from "../config/api";
 
 export default function RequestAccess() {
     const [searchParams] = useSearchParams();
@@ -26,7 +27,7 @@ export default function RequestAccess() {
         if (p) setProvider(p);
 
         // Fetch institutions list
-        axios.get("http://localhost:5000/auth/institutions")
+        axios.get(`${API_BASE_URL}/auth/institutions`)
             .then(res => setInstitutions(res.data))
             .catch(err => console.error("Error fetching institutions:", err));
     }, [searchParams]);
@@ -37,7 +38,7 @@ export default function RequestAccess() {
         setError("");
 
         try {
-            const res = await axios.post("http://localhost:5000/auth/request-access", {
+            const res = await axios.post(`${API_BASE_URL}/auth/request-access`, {
                 email, name, role, department, provider, password, institutionId
             });
             setMsg(res.data.message);
