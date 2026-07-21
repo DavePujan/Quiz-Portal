@@ -25,9 +25,19 @@ if (IS_TEST) {
         return delay;
     };
 
+    const formatRedisUrl = (url) => {
+        if (!url) return url;
+        if (url.includes("upstash.io") && url.startsWith("redis://")) {
+            return url.replace("redis://", "rediss://");
+        }
+        return url;
+    };
+
+    const redisUrl = formatRedisUrl(process.env.REDIS_URL);
+
     // Gracefully handles raw REDIS_URL string vs configuration object
-    const redisClient = process.env.REDIS_URL
-        ? new Redis(process.env.REDIS_URL, { retryStrategy, maxRetriesPerRequest: null })
+    const redisClient = redisUrl
+        ? new Redis(redisUrl, { retryStrategy, maxRetriesPerRequest: null, tls: redisUrl.startsWith("rediss://") ? { rejectUnauthorized: false } : undefined })
         : new Redis({ host: '127.0.0.1', port: 6379, retryStrategy, maxRetriesPerRequest: null });
     redisClient.isAvailable = false;
 
