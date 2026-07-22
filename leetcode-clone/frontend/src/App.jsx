@@ -4,7 +4,7 @@ import ProtectedRoute from "./auth/ProtectedRoute";
 import OAuthSuccess from "./auth/OAuthSuccess";
 import { AuthProvider } from "./context/AuthContext";
 import { AuthContext } from "./context/authStore";
-import { useContext, useState } from "react";
+import { useContext, useState, useEffect } from "react";
 import { Toaster } from "react-hot-toast";
 import "./styles/common.css";
 import { Menu, X, Sun, Moon } from "lucide-react";
@@ -151,11 +151,22 @@ function NavBar() {
 
 
 
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <Toaster position="top-right" />
       <BrowserRouter>
+        <ScrollToTop />
         <NavBar />
         <Routes>
           <Route path="/maintenance" element={<Maintenance />} />

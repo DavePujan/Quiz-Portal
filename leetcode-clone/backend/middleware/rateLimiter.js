@@ -56,9 +56,10 @@ class HybridStore {
     }
 
     async increment(key) {
-        if (redisClient.isAvailable) {
+        const useRedis = process.env.USE_REDIS_RATE_LIMIT === "true";
+        if (useRedis && redisClient.isAvailable) {
             this.warned = false;
-            // Try Redis first
+            // Try Redis first if explicitly enabled
             if (Date.now() >= this.redisDownUntil) {
                 try {
                     const store = this.getRedisStore();
@@ -66,18 +67,12 @@ class HybridStore {
                 } catch (e) {
                     console.warn("Redis failed, triggering 5 sec circuit breaker. Falling back to memory:", e.message);
                     this.redisDownUntil = Date.now() + 5000;
-                    fallbackCounter.inc(); //  Track crash-path fallback
+                    fallbackCounter.inc();
                 }
             }
-        } else {
-            if (!this.warned) {
-                console.warn("Using Memory Rate Limiter");
-                this.warned = true;
-            }
-            fallbackCounter.inc(); //  Track every unavailable-path fallback
         }
 
-        // Fallback -> Memory
+        // Default & high-performance fallback -> MemoryStore (0 Redis quota used)
         return this.memoryStore.increment(key);
     }
 

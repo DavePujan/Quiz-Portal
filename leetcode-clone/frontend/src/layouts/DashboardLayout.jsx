@@ -12,7 +12,7 @@ export default function DashboardLayout({ children }) {
         <div className="flex flex-col md:flex-row min-h-screen h-screen bg-background text-white overflow-hidden">
             {showSidebar && <Sidebar />}
 
-            <main className={`flex-1 overflow-y-auto relative w-full ${showSidebar ? "md:ml-64" : ""}`}>
+            <main className={`flex-1 overflow-y-auto relative w-full page-fade-in ${showSidebar ? "md:ml-64" : ""}`}>
                 <div className="min-h-full pb-12">
                     {children}
                 </div>

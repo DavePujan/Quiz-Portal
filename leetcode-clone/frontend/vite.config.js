@@ -7,10 +7,25 @@ export default defineConfig({
   build: {
     target: "esnext",
     cssCodeSplit: true,
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
-        manualChunks: {
-          monaco: ["@monaco-editor/react"]
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('@monaco-editor') || id.includes('monaco-editor')) {
+              return 'monaco';
+            }
+            if (id.includes('@supabase')) {
+              return 'supabase';
+            }
+            if (id.includes('lucide-react')) {
+              return 'icons';
+            }
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
+              return 'vendor-core';
+            }
+            return 'vendor-deps';
+          }
         }
       }
     }

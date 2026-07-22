@@ -146,25 +146,44 @@ async function deleteTeacherApiKey(email, providerCode) {
     );
 }
 
+const localAcademicCatalogCache = new Map();
+
 // Academic catalog used by the normalized quiz-creation form.
 router.get("/academics", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
     try {
         const userId = req.context.userId;
+        const localCached = localAcademicCatalogCache.get(userId);
+        if (localCached && Date.now() < localCached.expiresAt) {
+            return res.json(localCached.data);
+        }
+
         const cacheKey = `academic_catalog:teacher:${userId}`;
         
         if (redisClient.isAvailable) {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
+                const parsed = JSON.parse(cached);
+                localAcademicCatalogCache.set(userId, { data: parsed, expiresAt: Date.now() + 120000 });
                 console.log(`[Cache Hit] /academics for user ${userId}`);
-                return res.json(JSON.parse(cached));
+                return res.json(parsed);
             }
         }
 
-        let responseData = {};
-
-        if (FEATURES.NEW_ACADEMIC_MODEL) {
-            // Fetch course offerings for this teacher
-            const courseOfferingsResult = await pool.query(`
+        const [departmentsResult, semestersResult, subjectsResult, courseOfferingsResult] = await Promise.all([
+            pool.query(`SELECT id, code, name FROM departments ORDER BY code NULLS LAST, name`),
+            pool.query(`
+                SELECT at.id, at.term_number AS semester_no, at.term_type, at.program_id, p.department_id
+                FROM academic_terms at
+                JOIN programs p ON p.id = at.program_id
+                ORDER BY at.term_number, at.id
+            `),
+            pool.query(`
+                SELECT s.id, s.code, s.name, p.department_id, s.academic_term_id AS semester_id, s.program_id, s.institution_id
+                FROM subjects s
+                JOIN programs p ON p.id = s.program_id
+                ORDER BY s.name
+            `),
+            pool.query(`
                 SELECT 
                     co.id, 
                     s.name as subject_name, 
@@ -181,38 +200,17 @@ router.get("/academics", auth, authorize('teacher'), requireInstitutionContext, 
                 LEFT JOIN departments d ON d.id = p.department_id
                 WHERE co.teacher_id = $1
                 ORDER BY s.name
-            `, [userId]);
-            
-            responseData = {
-                courseOfferings: courseOfferingsResult.rows || [],
-                departments: [],
-                semesters: [],
-                subjects: []
-            };
-        } else {
-            const [departmentsResult, semestersResult, subjectsResult] = await Promise.all([
-                pool.query(`SELECT id, code, name FROM departments ORDER BY code NULLS LAST, name`),
-                pool.query(`
-                    SELECT at.id, at.term_number AS semester_no, at.term_type, at.program_id, p.department_id
-                    FROM academic_terms at
-                    JOIN programs p ON p.id = at.program_id
-                    ORDER BY at.term_number, at.id
-                `),
-                pool.query(`
-                    SELECT s.id, s.code, s.name, p.department_id, s.academic_term_id AS semester_id, s.program_id, s.institution_id
-                    FROM subjects s
-                    JOIN programs p ON p.id = s.program_id
-                    ORDER BY s.name
-                `)
-            ]);
+            `, [userId])
+        ]);
 
-            responseData = {
-                courseOfferings: [],
-                departments: departmentsResult.rows || [],
-                semesters: semestersResult.rows || [],
-                subjects: subjectsResult.rows || []
-            };
-        }
+        const responseData = {
+            courseOfferings: courseOfferingsResult.rows || [],
+            departments: departmentsResult.rows || [],
+            semesters: semestersResult.rows || [],
+            subjects: subjectsResult.rows || []
+        };
+
+        localAcademicCatalogCache.set(userId, { data: responseData, expiresAt: Date.now() + 120000 });
 
         if (redisClient.isAvailable) {
             await redisClient.set(cacheKey, JSON.stringify(responseData), 'EX', 300); // 5 minutes TTL
@@ -798,10 +796,18 @@ router.post("/ai/generate", auth, authorize('teacher'), aiLimiter, async (req, r
     }
 });
 
+async function ensureQuizIsPracticeColumn() {
+    await pool.query(`
+        ALTER TABLE quizzes
+        ADD COLUMN IF NOT EXISTS is_practice BOOLEAN DEFAULT false;
+    `);
+}
+
 // Unified Quiz Creation
 router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res) => {
     try {
         await ensureQuestionFunctionNameColumn();
+        await ensureQuizIsPracticeColumn();
 
         const {
             title,
@@ -814,8 +820,12 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
             questions,
             department,
             semester,
-            scheduledAt
+            scheduledAt,
+            isPractice,
+            quizCategory
         } = req.body;
+
+        const isPracticeFlag = Boolean(isPractice || quizCategory === "practice");
 
         // Fetch valid UUID from Supabase profiles
         const { data: profile, error } = await supabase
@@ -889,7 +899,8 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
             total_marks: totalMarks,
             description,
             quiz_type: "hybrid",
-            scheduled_at: scheduledAt || new Date()
+            scheduled_at: scheduledAt || new Date(),
+            is_practice: isPracticeFlag
         };
 
         if (FEATURES.NEW_ACADEMIC_MODEL) {

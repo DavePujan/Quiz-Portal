@@ -91,7 +91,8 @@ export default function EvaluationViewer() {
                 model: DEFAULT_MODELS[selectedProvider]
             });
             alert("Auto-Evaluation Complete!");
-            window.location.reload(); // Refresh to see scores
+            const updated = await getSubmissions();
+            setSubmission(updated.data);
         } catch (err) {
             console.error(err);
             if (err.response && err.response.data && err.response.data.error) {

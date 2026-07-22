@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import api from "../../utils/api";
-import { Activity, History, Clock, Users, ArrowRight, StopCircle, BarChart3, Building } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Activity, History, Clock, Users, StopCircle, BarChart3, Building } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 
 export default function TeacherDashboard() {
+    const navigate = useNavigate();
     const [stats, setStats] = useState({
         active: 0,
         upcoming: 0,
@@ -16,23 +17,22 @@ export default function TeacherDashboard() {
     const [quizzes, setQuizzes] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            try {
-                // Fetch Stats
-                const statsResponse = await api.get("/api/teacher/dashboard");
-                setStats(statsResponse.data || {});
+    const fetchData = async () => {
+        setLoading(true);
+        try {
+            const statsResponse = await api.get("/api/teacher/dashboard");
+            setStats(statsResponse.data || {});
 
-                // Fetch Quizzes
-                const quizResponse = await api.get("/api/teacher/quiz");
-                setQuizzes(quizResponse.data || []);
-            } catch (err) {
-                console.error("Error fetching dashboard data:", err);
-            } finally {
-                setLoading(false);
-            }
-        };
+            const quizResponse = await api.get("/api/teacher/quiz");
+            setQuizzes(quizResponse.data || []);
+        } catch (err) {
+            console.error("Error fetching dashboard data:", err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
         fetchData();
     }, []);
 
@@ -40,7 +40,9 @@ export default function TeacherDashboard() {
         if (!window.confirm("Are you sure you want to end this quiz?")) return;
         try {
             await api.post(`/api/teacher/quiz/${id}/end`);
-            window.location.reload();
+            // In-memory re-fetch for SPA experience without hard reload
+            const quizResponse = await api.get("/api/teacher/quiz");
+            setQuizzes(quizResponse.data || []);
         } catch (err) {
             console.error(err);
         }
@@ -211,7 +213,7 @@ export default function TeacherDashboard() {
                                     </div>
 
                                     <button
-                                        onClick={() => window.location.href = `/teacher/quiz/${q.id}/analytics`}
+                                        onClick={() => navigate(`/teacher/quiz/${q.id}/analytics`)}
                                         className="w-full flex items-center justify-center gap-2 py-2 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition-colors text-xs font-bold mt-2"
                                     >
                                         <BarChart3 size={14} />
@@ -240,7 +242,7 @@ export default function TeacherDashboard() {
                                             <td className="p-4 text-xs text-gray-400">{new Date(q.created_at).toLocaleDateString()}</td>
                                             <td className="p-4 text-right">
                                                 <button
-                                                    onClick={() => window.location.href = `/teacher/quiz/${q.id}/analytics`}
+                                                    onClick={() => navigate(`/teacher/quiz/${q.id}/analytics`)}
                                                     className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition-colors text-xs font-bold ml-auto"
                                                 >
                                                     <BarChart3 size={14} />

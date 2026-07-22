@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import api from "../../utils/api";
-import { Clock, FileText, User, ArrowRight, CheckCircle2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { FileText, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 
 export default function Evaluations() {
+    const navigate = useNavigate();
     const [list, setList] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -70,7 +71,7 @@ export default function Evaluations() {
 
                                 <button
                                     className="btn-primary w-full py-2.5 text-xs font-bold shadow-lg shadow-purple-500/20 flex items-center justify-center gap-2 mt-2"
-                                    onClick={() => window.location.href = `/teacher/evaluation/${item.id}`}
+                                    onClick={() => navigate(`/teacher/evaluation/${item.id}`)}
                                 >
                                     <span>Evaluate Submission</span>
                                     <ArrowRight size={14} />
@@ -105,7 +106,7 @@ export default function Evaluations() {
                                         <td className="p-4 text-right">
                                             <button
                                                 className="btn-primary py-1.5 px-4 text-xs font-bold shadow-lg shadow-purple-500/20"
-                                                onClick={() => window.location.href = `/teacher/evaluation/${item.id}`}
+                                                onClick={() => navigate(`/teacher/evaluation/${item.id}`)}
                                             >
                                                 Evaluate
                                             </button>

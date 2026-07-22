@@ -177,7 +177,29 @@ async function persistBehaviorForAttempt(userId, quizId, attemptId) {
     return { score, risk };
 }
 
-// Get All Active Quizzes for Students
+// Get All Practice Quizzes Added by Teachers
+router.get("/quizzes/practice", auth, async (req, res) => {
+    try {
+        await pool.query(`
+            ALTER TABLE quizzes
+            ADD COLUMN IF NOT EXISTS is_practice BOOLEAN DEFAULT false;
+        `);
+
+        const { data: quizzes, error } = await supabase
+            .from("quizzes")
+            .select("*, creator:profiles!created_by(full_name, email)")
+            .eq("is_practice", true)
+            .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        res.json(quizzes || []);
+    } catch (err) {
+        console.error("Fetch Teacher Practice Quizzes Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Get All Active/Scheduled Real Quizzes for Students
 router.get("/quizzes", auth, async (req, res) => {
     try {
         let query;
@@ -185,11 +207,13 @@ router.get("/quizzes", auth, async (req, res) => {
             query = supabase
                 .from("quizzes")
                 .select("*, course_offering:course_offerings(teacher:profiles!teacher_id(full_name, email))")
+                .or("is_practice.is.null,is_practice.eq.false")
                 .order("created_at", { ascending: false });
         } else {
             query = supabase
                 .from("quizzes")
                 .select("*, creator:profiles!created_by(full_name, email)")
+                .or("is_practice.is.null,is_practice.eq.false")
                 .order("created_at", { ascending: false });
         }
 

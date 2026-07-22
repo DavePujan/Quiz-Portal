@@ -10,7 +10,14 @@ export function AuthProvider({ children }) {
     const [role, setRole] = useState(localStorage.getItem("role"));
     const [user, setUser] = useState(null);
     const [profile, setProfile] = useState(null);
-    const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
+    const [theme, setTheme] = useState(() => {
+        const saved = localStorage.getItem("theme");
+        if (saved) return saved;
+        const systemPrefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const detected = systemPrefersDark ? "dark" : "light";
+        localStorage.setItem("theme", detected);
+        return detected;
+    });
     const [isAuthReady, setIsAuthReady] = useState(false);
     const token = role ? true : null; // Derived boolean for compatibility
 
@@ -110,18 +117,36 @@ export function AuthProvider({ children }) {
 
 
     useEffect(() => {
-        if (theme === "light") {
-            document.body.classList.add("theme-light");
-            document.body.classList.remove("theme-dark");
-        } else {
-            document.body.classList.remove("theme-light");
-            document.body.classList.add("theme-dark");
+        const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+        const handleSystemThemeChange = (e) => {
+            if (!localStorage.getItem("theme_user_selected")) {
+                const newSystemTheme = e.matches ? "dark" : "light";
+                setTheme(newSystemTheme);
+            }
+        };
+
+        if (mediaQuery?.addEventListener) {
+            mediaQuery.addEventListener("change", handleSystemThemeChange);
+            return () => mediaQuery.removeEventListener("change", handleSystemThemeChange);
         }
+    }, []);
+
+    useEffect(() => {
         localStorage.setItem("theme", theme);
+        document.documentElement.classList.remove("theme-light", "theme-dark");
+        document.documentElement.classList.add(`theme-${theme}`);
+        if (document.body) {
+            document.body.classList.remove("theme-light", "theme-dark");
+            document.body.classList.add(`theme-${theme}`);
+        }
     }, [theme]);
 
     const toggleTheme = () => {
-        setTheme(prev => prev === "light" ? "dark" : "light");
+        setTheme(prev => {
+            const next = prev === "light" ? "dark" : "light";
+            localStorage.setItem("theme_user_selected", "true");
+            return next;
+        });
     };
 
     useEffect(() => {

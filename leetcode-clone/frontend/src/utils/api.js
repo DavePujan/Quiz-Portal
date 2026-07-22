@@ -90,6 +90,7 @@ export const deleteUser = (email) => api.delete("/api/admin/user", { data: { ema
 export const getStudentComprehensiveAnalytics = (userId) => api.get(`/api/analytics/student/${userId}/comprehensive`);
 export const getStudentRecommendations = (userId) => api.get(`/api/analytics/student/${userId}/recommendations`);
 export const getStudentRecommendationsV2 = (userId) => api.get(`/api/analytics/student/${userId}/recommendations-v2`);
+export const getTeacherPracticeQuizzes = () => api.get("/api/student/quizzes/practice");
 export const exportTeacherQuizAnalytics = (quizId) => api.get(`/api/analytics/teacher/quiz/${quizId}/export`, { responseType: "blob" });
 
 // AI Provider Management

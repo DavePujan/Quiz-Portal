@@ -369,3 +369,19 @@ body {
   mask-image: radial-gradient(ellipse at center, black 65%, transparent 100%);
   -webkit-mask-image: radial-gradient(ellipse at center, black 65%, transparent 100%);
 }
+
+/* SPA Page Entrance Animation */
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-fade-in {
+  animation: pageFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

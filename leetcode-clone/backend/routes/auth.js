@@ -12,6 +12,7 @@ const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
 const AccessRequest = require("../models/AccessRequest");
 const { loginLimiter } = require("../middleware/rateLimiter");
+const { auth, setLocalBlacklist } = require("../middleware/auth");
 
 router.post("/login", loginLimiter, async (req, res) => {
     if (!redisClient.isAvailable) {
@@ -55,12 +56,25 @@ router.post("/login", loginLimiter, async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ error: "Invalid credentials" });
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
-    const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "30d" });
+    const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "90d" });
 
-    const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: process.env.NODE_ENV === "production" ? "none" : "lax" };
-    res.cookie("accessToken", token, cookieOptions);
-    res.cookie("refreshToken", refreshToken, cookieOptions);
+    const cookieOptionsAccess = {
+        httpOnly: true,
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 Days for SPA persistence
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
+    };
+
+    const cookieOptionsRefresh = {
+        httpOnly: true,
+        maxAge: 90 * 24 * 60 * 60 * 1000, // 90 Days for SPA persistence
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
+    };
+
+    res.cookie("accessToken", token, cookieOptionsAccess);
+    res.cookie("refreshToken", refreshToken, cookieOptionsRefresh);
 
     res.json({
         role: user.role,
@@ -211,11 +225,18 @@ router.get("/google/callback", (req, res, next) => {
         }
 
         // Success
-        const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
-        const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "7d" });
+        const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "30d" });
+        const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "90d" });
 
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
+            maxAge: 90 * 24 * 60 * 60 * 1000,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
+        });
+        res.cookie("accessToken", token, {
+            httpOnly: true,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
             secure: process.env.NODE_ENV === "production",
             sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
         });
@@ -232,11 +253,18 @@ router.get("/github/callback", (req, res, next) => {
             return res.redirect(`${CLIENT_URL}/login?error=not_found&email=${email}&provider=github`);
         }
 
-        const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
-        const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "7d" });
+        const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: "30d" });
+        const refreshToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, REFRESH_SECRET, { expiresIn: "90d" });
 
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
+            maxAge: 90 * 24 * 60 * 60 * 1000,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
+        });
+        res.cookie("accessToken", token, {
+            httpOnly: true,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
             secure: process.env.NODE_ENV === "production",
             sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
         });
@@ -263,10 +291,12 @@ router.post("/logout", async (req, res) => {
         if (accessToken) {
             const accHash = crypto.createHash("sha256").update(accessToken).digest("hex");
             await redisClient.set(`bl_${accHash}`, "true", "EX", 60 * 60); // Buffer of 1 hour for access tokens
+            setLocalBlacklist(accHash, true, 60 * 60 * 1000);
         }
         if (refreshToken) {
             const refHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
             await redisClient.set(`bl_${refHash}`, "true", "EX", 7 * 24 * 60 * 60); // Exact 7-day matching span
+            setLocalBlacklist(refHash, true, 7 * 24 * 60 * 60 * 1000);
         }
     }
 

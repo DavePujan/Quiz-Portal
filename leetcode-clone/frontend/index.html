@@ -4,7 +4,21 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>QuizPortal</title>
+    <meta name="description" content="QuizPortal is a modern online examination and automated code evaluation platform for universities and educational institutions." />
+    <meta name="theme-color" content="#09090b" />
+    <title>QuizPortal — Online Examination & Assessment Platform</title>
+    <script>
+      (function() {
+        try {
+          var t = localStorage.getItem("theme");
+          if (!t) {
+            t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+            localStorage.setItem("theme", t);
+          }
+          document.documentElement.classList.add("theme-" + t);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

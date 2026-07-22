@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Sparkles, ArrowRight, X, Rocket, ChevronDown, Settings, AlertCircle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import api, { createFullQuiz, getAcademicCatalog, getAiProviders } from "../../utils/api";
 import { FEATURES } from "../../config/features";
 
 export default function CreateQuiz() {
+    const navigate = useNavigate();
     const hasValidSupabaseUploadConfig =
         Boolean(import.meta.env.VITE_SUPABASE_URL) &&
         Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY) &&
@@ -21,7 +22,8 @@ export default function CreateQuiz() {
         duration: "",
         totalMarks: "",
         description: "",
-        scheduledAt: "" // New field
+        scheduledAt: "", // New field
+        quizCategory: "real" // "real" or "practice"
     });
 
     // List of Questions
@@ -186,6 +188,8 @@ export default function CreateQuiz() {
                 totalMarks: Number(quizDetails.totalMarks),
                 description: quizDetails.description,
                 scheduledAt: quizDetails.scheduledAt || null,
+                isPractice: quizDetails.quizCategory === "practice",
+                quizCategory: quizDetails.quizCategory,
                 questions: processedQuestions
             };
 
@@ -197,7 +201,7 @@ export default function CreateQuiz() {
 
             await createFullQuiz(payload);
             alert("Quiz Created Successfully!");
-            window.location.href = "/teacher";
+            navigate("/teacher");
         } catch (err) {
             console.error(err);
             if (err.message !== "Missing Supabase configuration.") {
@@ -291,9 +295,60 @@ export default function CreateQuiz() {
                     <input name="duration" placeholder="Duration (mins)" type="number" value={quizDetails.duration} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm" />
                     <input name="totalMarks" type="number" placeholder="Total Marks" value={quizDetails.totalMarks} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm" />
 
+                    {/* Target Quiz Type / Portal Selector */}
+                    <div className="flex flex-col col-span-1 md:col-span-2 bg-black/40 p-3.5 rounded-lg border border-gray-800 space-y-2">
+                        <label className="text-xs text-gray-400 uppercase font-bold tracking-wider flex items-center justify-between">
+                            <span>Quiz Category & Destination Portal</span>
+                            <span className="text-[10px] text-gray-500 font-normal normal-case">Select where this quiz will appear</span>
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setQuizDetails(prev => ({ ...prev, quizCategory: "real" }))}
+                                className={`flex items-center justify-between p-3 rounded-lg border text-xs font-bold transition-all text-left ${
+                                    quizDetails.quizCategory !== "practice"
+                                        ? "bg-blue-600/20 border-blue-500 text-white shadow-md shadow-blue-500/10"
+                                        : "bg-[#252526] border-gray-700 text-gray-400 hover:text-gray-200"
+                                }`}
+                            >
+                                <div className="flex items-center gap-2.5">
+                                    <span className="text-lg">🎯</span>
+                                    <div>
+                                        <p className="font-bold text-white">Real Assessment Quiz</p>
+                                        <p className="text-[10px] text-gray-400 font-normal leading-tight mt-0.5">
+                                            {quizDetails.scheduledAt ? "Scheduled Quiz for future start" : "Active Quiz for live exam grading"}
+                                        </p>
+                                    </div>
+                                </div>
+                                {quizDetails.quizCategory !== "practice" && <div className="w-2.5 h-2.5 rounded-full bg-blue-400 shrink-0 ml-2"></div>}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setQuizDetails(prev => ({ ...prev, quizCategory: "practice" }))}
+                                className={`flex items-center justify-between p-3 rounded-lg border text-xs font-bold transition-all text-left ${
+                                    quizDetails.quizCategory === "practice"
+                                        ? "bg-purple-600/20 border-purple-500 text-white shadow-md shadow-purple-500/10"
+                                        : "bg-[#252526] border-gray-700 text-gray-400 hover:text-gray-200"
+                                }`}
+                            >
+                                <div className="flex items-center gap-2.5">
+                                    <span className="text-lg">💡</span>
+                                    <div>
+                                        <p className="font-bold text-white">Practice Quiz (Teacher Added)</p>
+                                        <p className="text-[10px] text-gray-400 font-normal leading-tight mt-0.5">Untimed practice added to Student Practice Portal</p>
+                                    </div>
+                                </div>
+                                {quizDetails.quizCategory === "practice" && <div className="w-2.5 h-2.5 rounded-full bg-purple-400 shrink-0 ml-2"></div>}
+                            </button>
+                        </div>
+                    </div>
+
                     {/* Schedule Quiz */}
                     <div className="flex flex-col">
-                        <label className="text-xs text-gray-500 mb-1 ml-1 uppercase font-bold tracking-wider">Schedule Start (Optional)</label>
+                        <label className="text-xs text-gray-500 mb-1 ml-1 uppercase font-bold tracking-wider">
+                            Schedule Start (Optional)
+                        </label>
                         <input
                             name="scheduledAt"
                             type="datetime-local"
