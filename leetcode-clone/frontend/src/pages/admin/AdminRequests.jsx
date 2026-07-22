@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api from "../../utils/api";
 import { Link } from "react-router-dom";
-import { Search, RotateCcw, CheckCircle, XCircle, ArrowLeft } from "lucide-react";
+import { Search, RotateCcw, CheckCircle, XCircle, ArrowLeft, Mail, Building2, Calendar } from "lucide-react";
 
 export default function AdminRequests() {
     const [requests, setRequests] = useState([]);
@@ -114,7 +114,7 @@ export default function AdminRequests() {
 
             {error && <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-lg text-sm mb-6">{error}</div>}
 
-            {/* Filter Bar */}
+            {/* Filter Controls Bar */}
             <div className="card p-4 sm:p-6 mb-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
                     <div>
@@ -170,20 +170,72 @@ export default function AdminRequests() {
                 </div>
             </div>
 
-            {/* Table Container */}
-            <div className="card p-0 overflow-hidden border border-gray-800 shadow-xl">
-                {loading ? (
-                    <div className="flex justify-center items-center py-16">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            {loading ? (
+                <div className="flex justify-center items-center py-16">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+            ) : filteredRequests.length === 0 ? (
+                <div className="card p-8 text-center border border-gray-800">
+                    <p className="text-base font-semibold text-gray-400">No pending access requests match your criteria.</p>
+                    <p className="text-xs text-gray-600 mt-1">Check back later or adjust your filters.</p>
+                </div>
+            ) : (
+                <>
+                    {/* MOBILE REQUEST CARD VIEW (Visible on screens < md) */}
+                    <div className="block md:hidden space-y-4">
+                        {filteredRequests.map(req => (
+                            <div key={req.id || req.email} className="card p-4 border border-gray-800 space-y-3 bg-[#0d0d0d]">
+                                <div className="flex items-start justify-between gap-2 pb-3 border-b border-gray-800">
+                                    <div>
+                                        <h3 className="font-bold text-white text-base truncate">{req.name || "Access Request"}</h3>
+                                        <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5">
+                                            <Mail size={12} className="text-gray-500 shrink-0" />
+                                            <span className="truncate">{req.email}</span>
+                                        </div>
+                                    </div>
+                                    <span className={`px-2.5 py-1 rounded-md text-[10px] uppercase font-bold tracking-wider shrink-0 ${
+                                        req.role === 'teacher' 
+                                            ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' 
+                                            : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                    }`}>
+                                        {req.role}
+                                    </span>
+                                </div>
+
+                                <div className="flex items-center justify-between text-xs text-gray-400">
+                                    <span className="flex items-center gap-1">
+                                        <Building2 size={12} className="text-gray-500" />
+                                        <span>{req.department || "General"}</span>
+                                    </span>
+                                    <span className="flex items-center gap-1 font-mono text-gray-500">
+                                        <Calendar size={12} />
+                                        <span>{req.created_at ? new Date(req.created_at).toLocaleDateString() : "Pending"}</span>
+                                    </span>
+                                </div>
+
+                                <div className="pt-2 border-t border-gray-800 grid grid-cols-2 gap-2">
+                                    <button
+                                        onClick={() => approve(req.email)}
+                                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-green-500/10 text-green-400 border border-green-500/20 rounded-lg hover:bg-green-500/20 transition-colors text-xs font-bold"
+                                    >
+                                        <CheckCircle size={14} />
+                                        <span>Approve</span>
+                                    </button>
+                                    <button
+                                        onClick={() => reject(req.email)}
+                                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors text-xs font-bold"
+                                    >
+                                        <XCircle size={14} />
+                                        <span>Reject</span>
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                ) : filteredRequests.length === 0 ? (
-                    <div className="p-12 text-center">
-                        <p className="text-base font-semibold text-gray-400">No pending access requests match your criteria.</p>
-                        <p className="text-xs text-gray-600 mt-1">Check back later or adjust your filters.</p>
-                    </div>
-                ) : (
-                    <div className="overflow-x-auto w-full">
-                        <table className="w-full text-left border-collapse min-w-[700px]">
+
+                    {/* DESKTOP REQUEST TABLE VIEW (Visible on screens >= md) */}
+                    <div className="hidden md:block card p-0 overflow-hidden border border-gray-800 shadow-xl">
+                        <table className="w-full text-left border-collapse">
                             <thead className="bg-white/5 border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
                                 <tr>
                                     <th className="p-4 font-semibold">Submitted</th>
@@ -236,8 +288,8 @@ export default function AdminRequests() {
                             </tbody>
                         </table>
                     </div>
-                )}
-            </div>
+                </>
+            )}
         </div>
     );
 }

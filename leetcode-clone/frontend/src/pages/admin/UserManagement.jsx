@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { getUsers, promoteUser, deleteUser } from "../../utils/api";
-import { Search, RotateCcw, UserCheck, Shield, ArrowDownRight, Trash2 } from "lucide-react";
+import { Search, RotateCcw, UserCheck, Shield, ArrowDownRight, Trash2, Mail, Building2 } from "lucide-react";
 
 export default function UserManagement() {
     const [users, setUsers] = useState([]);
@@ -33,19 +33,14 @@ export default function UserManagement() {
 
     const promote = (email, role) => {
         promoteUser(email, role)
-            .then(() => {
-                fetchUsers();
-            })
+            .then(() => fetchUsers())
             .catch(err => alert("Failed to update: " + err.message));
     };
 
     const removeUser = (email) => {
         if (!confirm(`Are you sure you want to remove access for ${email}? This action is irreversible.`)) return;
-
         deleteUser(email)
-            .then(() => {
-                fetchUsers();
-            })
+            .then(() => fetchUsers())
             .catch(err => alert("Failed to remove user: " + (err.response?.data?.error || err.message)));
     };
 
@@ -63,7 +58,6 @@ export default function UserManagement() {
         }
     };
 
-    // Dynamically collect unique departments from users + default list
     const allDepartments = Array.from(
         new Set([
             ...defaultDepartments,
@@ -71,12 +65,9 @@ export default function UserManagement() {
         ])
     ).sort();
 
-    // Flexible case-insensitive matching
     const filteredUsers = users.filter(u => {
-        // Role match
         if (roleFilter !== "all" && u.role !== roleFilter) return false;
 
-        // Department match (case-insensitive & trimmed)
         if (deptFilter !== "all") {
             if (!u.department) return false;
             const uDept = u.department.trim().toLowerCase();
@@ -85,10 +76,9 @@ export default function UserManagement() {
             if (!matches) return false;
         }
 
-        // Search Keyword match (Name or Email)
         if (searchTerm.trim()) {
             const term = searchTerm.trim().toLowerCase();
-            const nameMatch = (u.full_name || "").toLowerCase().includes(term);
+            const nameMatch = (u.full_name || u.name || "").toLowerCase().includes(term);
             const emailMatch = (u.email || "").toLowerCase().includes(term);
             if (!nameMatch && !emailMatch) return false;
         }
@@ -100,6 +90,11 @@ export default function UserManagement() {
         setRoleFilter("all");
         setDeptFilter("all");
         setSearchTerm("");
+    };
+
+    const getInitials = (name, email) => {
+        const str = name || email || "?";
+        return str.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
     };
 
     return (
@@ -119,10 +114,9 @@ export default function UserManagement() {
                 </div>
             </div>
 
-            {/* Filter Bar */}
+            {/* Filter Controls Bar */}
             <div className="card p-4 sm:p-6 mb-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
-                    {/* Search Input */}
                     <div>
                         <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Search User</label>
                         <div className="relative">
@@ -137,7 +131,6 @@ export default function UserManagement() {
                         </div>
                     </div>
 
-                    {/* Role Filter */}
                     <div>
                         <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Filter by Role</label>
                         <select
@@ -152,7 +145,6 @@ export default function UserManagement() {
                         </select>
                     </div>
 
-                    {/* Department Filter */}
                     <div>
                         <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Filter by Department</label>
                         <select
@@ -167,7 +159,6 @@ export default function UserManagement() {
                         </select>
                     </div>
 
-                    {/* Reset Button */}
                     <div>
                         <button
                             onClick={resetFilters}
@@ -180,15 +171,103 @@ export default function UserManagement() {
                 </div>
             </div>
 
-            {/* Users Table Card */}
-            <div className="card p-0 overflow-hidden border border-gray-800 shadow-xl">
-                {loading ? (
-                    <div className="flex justify-center items-center py-16">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            {loading ? (
+                <div className="flex justify-center items-center py-16">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+            ) : filteredUsers.length === 0 ? (
+                <div className="card p-8 text-center border border-gray-800">
+                    <p className="text-base font-semibold text-gray-400">No users found matching filters.</p>
+                    <p className="text-xs text-gray-600 mt-1">Try adjusting role, department, or search query.</p>
+                    <button
+                        onClick={resetFilters}
+                        className="mt-3 px-4 py-1.5 text-xs bg-primary/20 text-primary border border-primary/30 rounded-lg hover:bg-primary/30 transition-colors font-bold"
+                    >
+                        Clear Filters
+                    </button>
+                </div>
+            ) : (
+                <>
+                    {/* MOBILE CARD VIEW (Visible on screens < md) */}
+                    <div className="block md:hidden space-y-4">
+                        {filteredUsers.map(u => (
+                            <div key={u.email} className="card p-4 border border-gray-800 space-y-3 bg-[#0d0d0d]">
+                                <div className="flex items-start justify-between gap-3 pb-3 border-b border-gray-800">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-500/20 to-purple-500/20 border border-white/10 flex items-center justify-center shrink-0 font-bold text-sm text-primary">
+                                            {getInitials(u.full_name || u.name, u.email)}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <h3 className="font-bold text-white text-base truncate">{u.full_name || u.name || "N/A"}</h3>
+                                            <div className="flex items-center gap-1 text-xs text-gray-400 mt-0.5">
+                                                <Mail size={12} className="shrink-0 text-gray-500" />
+                                                <span className="truncate">{u.email}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <span className={`px-2.5 py-1 rounded-md text-[10px] uppercase font-bold tracking-wider shrink-0 ${
+                                        u.role === 'admin' 
+                                            ? 'bg-red-500/20 text-red-300 border border-red-500/30' 
+                                            : u.role === 'teacher' 
+                                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' 
+                                                : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                    }`}>
+                                        {u.role}
+                                    </span>
+                                </div>
+
+                                <div className="flex items-center justify-between text-xs text-gray-400">
+                                    <span className="flex items-center gap-1.5 text-gray-400 font-medium">
+                                        <Building2 size={13} className="text-gray-500" />
+                                        <span>{u.department || "General"}</span>
+                                    </span>
+                                </div>
+
+                                <div className="pt-2 border-t border-gray-800/80 grid grid-cols-2 gap-2">
+                                    {u.role !== "teacher" && u.role !== "admin" && (
+                                        <button 
+                                            onClick={() => promote(u.email, "teacher")} 
+                                            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-lg hover:bg-purple-500/20 transition-colors text-xs font-semibold"
+                                        >
+                                            <UserCheck size={14} />
+                                            <span>Make Teacher</span>
+                                        </button>
+                                    )}
+                                    {u.role !== "admin" && (
+                                        <button 
+                                            onClick={() => promote(u.email, "admin")} 
+                                            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors text-xs font-semibold"
+                                        >
+                                            <Shield size={14} />
+                                            <span>Make Admin</span>
+                                        </button>
+                                    )}
+
+                                    {u.role !== "student" && (
+                                        <button 
+                                            onClick={() => handleDemote(u)} 
+                                            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition-colors text-xs font-semibold"
+                                        >
+                                            <ArrowDownRight size={14} />
+                                            <span>Demote Role</span>
+                                        </button>
+                                    )}
+
+                                    <button 
+                                        onClick={() => removeUser(u.email)} 
+                                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors text-xs font-semibold col-span-2 sm:col-span-1"
+                                    >
+                                        <Trash2 size={14} />
+                                        <span>Remove User</span>
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                ) : (
-                    <div className="overflow-x-auto w-full">
-                        <table className="w-full text-left border-collapse min-w-[700px]">
+
+                    {/* DESKTOP TABLE VIEW (Visible on screens >= md) */}
+                    <div className="hidden md:block card p-0 overflow-hidden border border-gray-800 shadow-xl">
+                        <table className="w-full text-left border-collapse">
                             <thead className="bg-white/5 border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
                                 <tr>
                                     <th className="p-4 font-semibold">User Details</th>
@@ -198,92 +277,73 @@ export default function UserManagement() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-800/60 font-light text-gray-300">
-                                {filteredUsers.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="4" className="p-8 text-center text-gray-500">
-                                            <p className="text-base font-semibold text-gray-400">No users found matching filters.</p>
-                                            <p className="text-xs text-gray-600 mt-1">Try resetting or adjusting role, department, or search query.</p>
-                                            <button
-                                                onClick={resetFilters}
-                                                className="mt-3 px-4 py-1.5 text-xs bg-primary/20 text-primary border border-primary/30 rounded-lg hover:bg-primary/30 transition-colors font-bold"
-                                            >
-                                                Clear Filters
-                                            </button>
+                                {filteredUsers.map(u => (
+                                    <tr key={u.email} className="hover:bg-white/5 transition-colors">
+                                        <td className="p-4">
+                                            <div className="font-bold text-white text-sm">{u.full_name || u.name || "N/A"}</div>
+                                            <div className="text-xs text-gray-400 font-mono mt-0.5">{u.email}</div>
+                                        </td>
+                                        <td className="p-4">
+                                            <span className={`px-2.5 py-1 rounded-md text-[11px] uppercase font-bold tracking-wider inline-block ${
+                                                u.role === 'admin' 
+                                                    ? 'bg-red-500/20 text-red-300 border border-red-500/30' 
+                                                    : u.role === 'teacher' 
+                                                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' 
+                                                        : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                            }`}>
+                                                {u.role}
+                                            </span>
+                                        </td>
+                                        <td className="p-4 text-xs text-gray-400">
+                                            {u.department || "-"}
+                                        </td>
+                                        <td className="p-4 text-right">
+                                            <div className="flex flex-wrap justify-end gap-2">
+                                                {u.role !== "teacher" && u.role !== "admin" && (
+                                                    <button 
+                                                        onClick={() => promote(u.email, "teacher")} 
+                                                        className="flex items-center gap-1 px-3 py-1.5 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded hover:bg-purple-500/20 transition-colors text-xs font-semibold"
+                                                    >
+                                                        <UserCheck size={13} />
+                                                        <span>Make Teacher</span>
+                                                    </button>
+                                                )}
+                                                {u.role !== "admin" && (
+                                                    <button 
+                                                        onClick={() => promote(u.email, "admin")} 
+                                                        className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded hover:bg-red-500/20 transition-colors text-xs font-semibold"
+                                                    >
+                                                        <Shield size={13} />
+                                                        <span>Make Admin</span>
+                                                    </button>
+                                                )}
+
+                                                {u.role !== "student" && (
+                                                    <button 
+                                                        onClick={() => handleDemote(u)} 
+                                                        className="flex items-center gap-1 px-3 py-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded hover:bg-amber-500/20 transition-colors text-xs font-semibold"
+                                                    >
+                                                        <ArrowDownRight size={13} />
+                                                        <span>Demote</span>
+                                                    </button>
+                                                )}
+
+                                                <button 
+                                                    onClick={() => removeUser(u.email)} 
+                                                    className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded hover:bg-red-500/20 transition-colors text-xs font-semibold"
+                                                >
+                                                    <Trash2 size={13} />
+                                                    <span>Remove</span>
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
-                                ) : (
-                                    filteredUsers.map(u => (
-                                        <tr key={u.email} className="hover:bg-white/5 transition-colors">
-                                            <td className="p-4">
-                                                <div className="font-bold text-white text-sm">{u.full_name || u.name || "N/A"}</div>
-                                                <div className="text-xs text-gray-400 font-mono mt-0.5">{u.email}</div>
-                                            </td>
-                                            <td className="p-4">
-                                                <span className={`px-2.5 py-1 rounded-md text-[11px] uppercase font-bold tracking-wider inline-block ${
-                                                    u.role === 'admin' 
-                                                        ? 'bg-red-500/20 text-red-300 border border-red-500/30' 
-                                                        : u.role === 'teacher' 
-                                                            ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' 
-                                                            : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                                                }`}>
-                                                    {u.role}
-                                                </span>
-                                            </td>
-                                            <td className="p-4 text-xs text-gray-400">
-                                                {u.department || "-"}
-                                            </td>
-                                            <td className="p-4 text-right">
-                                                <div className="flex flex-wrap justify-end gap-1.5">
-                                                    {u.role !== "teacher" && u.role !== "admin" && (
-                                                        <button 
-                                                            onClick={() => promote(u.email, "teacher")} 
-                                                            className="flex items-center gap-1 px-2.5 py-1 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded hover:bg-purple-500/20 transition-colors text-xs font-semibold"
-                                                            title="Promote to Teacher"
-                                                        >
-                                                            <UserCheck size={12} />
-                                                            <span>Make Teacher</span>
-                                                        </button>
-                                                    )}
-                                                    {u.role !== "admin" && (
-                                                        <button 
-                                                            onClick={() => promote(u.email, "admin")} 
-                                                            className="flex items-center gap-1 px-2.5 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded hover:bg-red-500/20 transition-colors text-xs font-semibold"
-                                                            title="Promote to Admin"
-                                                        >
-                                                            <Shield size={12} />
-                                                            <span>Make Admin</span>
-                                                        </button>
-                                                    )}
-
-                                                    {u.role !== "student" && (
-                                                        <button 
-                                                            onClick={() => handleDemote(u)} 
-                                                            className="flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded hover:bg-amber-500/20 transition-colors text-xs font-semibold"
-                                                            title="Demote Role"
-                                                        >
-                                                            <ArrowDownRight size={12} />
-                                                            <span>Demote</span>
-                                                        </button>
-                                                    )}
-
-                                                    <button 
-                                                        onClick={() => removeUser(u.email)} 
-                                                        className="flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded hover:bg-red-500/20 transition-colors text-xs font-semibold"
-                                                        title="Delete User"
-                                                    >
-                                                        <Trash2 size={12} />
-                                                        <span className="hidden sm:inline">Remove</span>
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
+                                ))}
                             </tbody>
                         </table>
                     </div>
-                )}
-            </div>
+                </>
+            )}
         </div>
     );
 }
