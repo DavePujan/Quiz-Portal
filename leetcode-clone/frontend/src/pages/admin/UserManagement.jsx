@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { getUsers, promoteUser, deleteUser } from "../../utils/api";
-import { Search, RotateCcw, UserCheck, Shield, ArrowDownRight, Trash2, Mail, Building2 } from "lucide-react";
+import { Search, RotateCcw, UserCheck, Shield, ArrowDownRight, Trash2, Mail, Building2, ChevronLeft, ChevronRight } from "lucide-react";
 
 export default function UserManagement() {
     const [users, setUsers] = useState([]);
@@ -8,6 +8,10 @@ export default function UserManagement() {
     const [deptFilter, setDeptFilter] = useState("all");
     const [searchTerm, setSearchTerm] = useState("");
     const [loading, setLoading] = useState(true);
+
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(10);
 
     const defaultDepartments = [
         "Biomedical Engineering", "Computer Engineering", "Electronics & Communication Engineering",
@@ -19,6 +23,11 @@ export default function UserManagement() {
     useEffect(() => {
         fetchUsers();
     }, []);
+
+    // Reset pagination when filter values change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm, roleFilter, deptFilter, itemsPerPage]);
 
     const fetchUsers = () => {
         setLoading(true);
@@ -86,10 +95,19 @@ export default function UserManagement() {
         return true;
     });
 
+    // Pagination calculations
+    const totalItems = filteredUsers.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
+    const validPage = Math.min(Math.max(1, currentPage), totalPages);
+    const startIndex = (validPage - 1) * itemsPerPage;
+    const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+    const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
+
     const resetFilters = () => {
         setRoleFilter("all");
         setDeptFilter("all");
         setSearchTerm("");
+        setCurrentPage(1);
     };
 
     const getInitials = (name, email) => {
@@ -190,7 +208,7 @@ export default function UserManagement() {
                 <>
                     {/* MOBILE CARD VIEW (Visible on screens < md) */}
                     <div className="block md:hidden space-y-4">
-                        {filteredUsers.map(u => (
+                        {paginatedUsers.map(u => (
                             <div key={u.email} className="card p-4 border border-gray-800 space-y-3 bg-[#0d0d0d]">
                                 <div className="flex items-start justify-between gap-3 pb-3 border-b border-gray-800">
                                     <div className="flex items-center gap-3 min-w-0">
@@ -277,7 +295,7 @@ export default function UserManagement() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-800/60 font-light text-gray-300">
-                                {filteredUsers.map(u => (
+                                {paginatedUsers.map(u => (
                                     <tr key={u.email} className="hover:bg-white/5 transition-colors">
                                         <td className="p-4">
                                             <div className="font-bold text-white text-sm">{u.full_name || u.name || "N/A"}</div>
@@ -342,6 +360,72 @@ export default function UserManagement() {
                             </tbody>
                         </table>
                     </div>
+
+                    {/* PAGINATION CONTROLS BAR */}
+                    {totalItems > 0 && (
+                        <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 card p-4 border border-gray-800 bg-[#0d0d0d]">
+                            <div className="text-xs text-gray-400 font-medium">
+                                Showing <span className="font-bold text-white">{startIndex + 1}</span> to{" "}
+                                <span className="font-bold text-white">{endIndex}</span> of{" "}
+                                <span className="font-bold text-primary">{totalItems}</span> users
+                            </div>
+
+                            <div className="flex items-center gap-1.5 sm:gap-2">
+                                <button
+                                    onClick={() => setCurrentPage(1)}
+                                    disabled={validPage === 1}
+                                    className="px-2.5 py-1.5 rounded-lg border border-gray-800 bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none text-xs font-bold transition-all"
+                                    title="First Page"
+                                >
+                                    &laquo;
+                                </button>
+                                <button
+                                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                    disabled={validPage === 1}
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-800 bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none text-xs font-bold transition-all"
+                                >
+                                    <ChevronLeft size={14} />
+                                    <span>Prev</span>
+                                </button>
+
+                                <span className="text-xs text-gray-400 px-2 font-mono">
+                                    Page <strong className="text-white">{validPage}</strong> of <strong className="text-white">{totalPages}</strong>
+                                </span>
+
+                                <button
+                                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                                    disabled={validPage === totalPages}
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-800 bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none text-xs font-bold transition-all"
+                                >
+                                    <span>Next</span>
+                                    <ChevronRight size={14} />
+                                </button>
+                                <button
+                                    onClick={() => setCurrentPage(totalPages)}
+                                    disabled={validPage === totalPages}
+                                    className="px-2.5 py-1.5 rounded-lg border border-gray-800 bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none text-xs font-bold transition-all"
+                                    title="Last Page"
+                                >
+                                    &raquo;
+                                </button>
+                            </div>
+
+                            <div className="flex items-center gap-2 text-xs text-gray-400 font-medium">
+                                <span>Per page:</span>
+                                <select
+                                    value={itemsPerPage}
+                                    onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                                    className="input py-1 px-2.5 text-xs bg-[#1e1e1e] border-gray-700 text-white rounded-lg cursor-pointer"
+                                >
+                                    <option value={10}>10</option>
+                                    <option value={15}>15</option>
+                                    <option value={25}>25</option>
+                                    <option value={50}>50</option>
+                                    <option value={100}>100</option>
+                                </select>
+                            </div>
+                        </div>
+                    )}
                 </>
             )}
         </div>

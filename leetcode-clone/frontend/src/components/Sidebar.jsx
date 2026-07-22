@@ -66,10 +66,6 @@ export default function Sidebar() {
                         <Settings size={18} />
                         <span>Settings</span>
                     </Link>
-                    <Link to="/admin/logs" className={navItemClass("/admin/logs")}>
-                        <FileText size={18} />
-                        <span>Audit Logs</span>
-                    </Link>
                 </>
             )}
 
