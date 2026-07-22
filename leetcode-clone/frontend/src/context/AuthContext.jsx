@@ -29,6 +29,9 @@ export function AuthProvider({ children }) {
         }
         
         localStorage.removeItem("role");
+        localStorage.removeItem("token");
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
         setRole(null);
         setUser(null);
         setProfile(null);
@@ -37,13 +40,29 @@ export function AuthProvider({ children }) {
 
     useEffect(() => {
         const validateSession = async () => {
+            const storedToken = localStorage.getItem("accessToken") || localStorage.getItem("token");
+            const storedRefreshToken = localStorage.getItem("refreshToken");
+
             try {
-                // If refresh works, session cookies are still valid.
-                await axios.post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true });
+                const headers = {};
+                if (storedToken) headers.Authorization = `Bearer ${storedToken}`;
+                if (storedRefreshToken) headers["x-refresh-token"] = storedRefreshToken;
+
+                const res = await axios.post(`${API_BASE_URL}/auth/refresh`, { refreshToken: storedRefreshToken }, {
+                    withCredentials: true,
+                    headers
+                });
+
+                if (res.data?.accessToken || res.data?.token) {
+                    const newToken = res.data.accessToken || res.data.token;
+                    localStorage.setItem("accessToken", newToken);
+                    localStorage.setItem("token", newToken);
+                }
             } catch {
-                // Stale local role can cause redirect loops between /login and protected routes.
-                localStorage.removeItem("role");
-                setRole(null);
+                if (!storedToken && !storedRefreshToken) {
+                    localStorage.removeItem("role");
+                    setRole(null);
+                }
             } finally {
                 setIsAuthReady(true);
             }
@@ -59,7 +78,12 @@ export function AuthProvider({ children }) {
                 return;
             }
             try {
-                const res = await axios.get(`${API_BASE_URL}/auth/profile`, { withCredentials: true });
+                const storedToken = localStorage.getItem("accessToken") || localStorage.getItem("token");
+                const headers = storedToken ? { Authorization: `Bearer ${storedToken}` } : {};
+                const res = await axios.get(`${API_BASE_URL}/auth/profile`, {
+                    withCredentials: true,
+                    headers
+                });
                 setProfile(res.data);
             } catch (err) {
                 console.error("Failed to fetch detailed profile:", err);
@@ -71,6 +95,19 @@ export function AuthProvider({ children }) {
             fetchProfile();
         }
     }, [role, isAuthReady]);
+
+    useEffect(() => {
+        if (!role) return;
+        const interval = setInterval(async () => {
+            try {
+                await axios.get(`${API_BASE_URL}/api/ping`);
+            } catch (e) {
+                // Ignore silent background ping errors
+            }
+        }, 5 * 60 * 1000);
+        return () => clearInterval(interval);
+    }, [role]);
+
 
     useEffect(() => {
         if (theme === "light") {

@@ -7,8 +7,12 @@ const api = axios.create({
     withCredentials: true // For sending cookies
 });
 
-// Request interceptor (legacy token attachment removed for strictly cookie-based auth)
+// Request interceptor: attach Authorization header for dual token support
 api.interceptors.request.use((config) => {
+    const token = localStorage.getItem("accessToken") || localStorage.getItem("token");
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
 });
 
@@ -22,18 +26,30 @@ api.interceptors.response.use(
         }
 
         const originalRequest = error.config;
-        if (error.response.status === 401 && !originalRequest._retry) {
+        if (error.response?.status === 401 && !originalRequest._retry) {
             originalRequest._retry = true;
             try {
-                // The backend will automatically set the new accessToken HTTP-Only cookie in the response
-                await axios.post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true });
+                const refreshToken = localStorage.getItem("refreshToken");
+                const headers = refreshToken ? { "x-refresh-token": refreshToken } : {};
+                const res = await axios.post(`${API_BASE_URL}/auth/refresh`, { refreshToken }, {
+                    withCredentials: true,
+                    headers
+                });
 
-                // Retry original request, cookies are automatically sent withCredentials
+                if (res.data?.accessToken || res.data?.token) {
+                    const newAccess = res.data.accessToken || res.data.token;
+                    localStorage.setItem("accessToken", newAccess);
+                    localStorage.setItem("token", newAccess);
+                    originalRequest.headers.Authorization = `Bearer ${newAccess}`;
+                }
+
                 return api(originalRequest);
             } catch (err) {
-                // Refresh failed, session completely expired, redirect to login
                 console.error("Refresh failed", err);
                 localStorage.removeItem("role");
+                localStorage.removeItem("token");
+                localStorage.removeItem("accessToken");
+                localStorage.removeItem("refreshToken");
                 window.location.href = "/login";
                 return Promise.reject(err);
             }
@@ -41,6 +57,9 @@ api.interceptors.response.use(
         return Promise.reject(error);
     }
 );
+
+export const pingBackend = () => api.get("/api/ping");
+
 
 export const submitCodeAsync = (data, mode = "submit") => api.post(`/api/submit-async?mode=${mode}`, data);
 export const getUsers = () => api.get("/api/admin/users");

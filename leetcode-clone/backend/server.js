@@ -97,6 +97,7 @@ app.use((req, res, next) => {
 
 app.get("/", (req, res) => res.status(200).json({ status: "OK", message: "QuizPortal Backend API Running" }));
 app.get("/health", (req, res) => res.status(200).send("OK"));
+app.get("/api/ping", (req, res) => res.status(200).json({ status: "ok", timestamp: Date.now() }));
 
 app.use("/api/teacher", auth, authorize('teacher'), teacherRoutes);
 app.use("/api/student", studentRoutes);
@@ -120,6 +121,8 @@ app.use((err, req, res, next) => {
     });
 });
 
+const { startKeepAlive } = require("./utils/keepAlive");
+
 if (require.main === module) {
     const PORT = process.env.PORT || 5000;
 
@@ -133,7 +136,9 @@ if (require.main === module) {
 
     server.listen(PORT, () => {
         console.log(`Backend running on port ${PORT}`);
+        startKeepAlive();
     });
 }
+
 
 module.exports = app;

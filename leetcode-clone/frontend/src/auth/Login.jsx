@@ -53,6 +53,15 @@ export default function Login() {
                 password
             }, { withCredentials: true });
 
+            if (res.data.accessToken || res.data.token) {
+                const token = res.data.accessToken || res.data.token;
+                localStorage.setItem("accessToken", token);
+                localStorage.setItem("token", token);
+            }
+            if (res.data.refreshToken) {
+                localStorage.setItem("refreshToken", res.data.refreshToken);
+            }
+
             login(res.data.role);
 
             if (res.data.role === 'teacher') navigate("/teacher");

@@ -18,13 +18,15 @@ router.post("/login", loginLimiter, async (req, res) => {
         res.set("X-Fallback-Mode", "memory");
     }
     const { email, password } = req.body;
-    let user = await User.findOne({ email });
+    const lowerEmail = (email || "").toLowerCase().trim();
+
+    let user = await User.findOne(u => u.email.toLowerCase() === lowerEmail);
 
     if (!user) {
         // Fallback: Check Supabase
         const { createClient } = require("@supabase/supabase-js");
         const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-        const { data: sbUser } = await supabase.from("profiles").select("*").eq("email", email).single();
+        const { data: sbUser } = await supabase.from("profiles").select("*").ilike("email", lowerEmail).maybeSingle();
 
         if (sbUser) {
             user = {
@@ -41,7 +43,7 @@ router.post("/login", loginLimiter, async (req, res) => {
 
     if (!user) {
         // Check if there is a pending request
-        const pending = AccessRequest.find(r => r.email === email);
+        const pending = AccessRequest.find(r => r.email.toLowerCase() === lowerEmail);
         if (pending) {
             return res.status(403).json({ error: "Access request is pending approval by admin." });
         }
@@ -60,8 +62,14 @@ router.post("/login", loginLimiter, async (req, res) => {
     res.cookie("accessToken", token, cookieOptions);
     res.cookie("refreshToken", refreshToken, cookieOptions);
 
-    res.json({ role: user.role });
+    res.json({
+        role: user.role,
+        accessToken: token,
+        token: token,
+        refreshToken: refreshToken
+    });
 });
+
 
 const { createClient } = require("@supabase/supabase-js");
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -145,7 +153,7 @@ router.get("/institutions", async (req, res) => {
 });
 
 router.post("/refresh", async (req, res) => {
-    const token = req.cookies.refreshToken;
+    const token = req.cookies.refreshToken || req.headers["x-refresh-token"] || req.body.refreshToken;
     if (!token) return res.status(401).json({ error: "No refresh token" });
 
     try {
@@ -160,11 +168,16 @@ router.post("/refresh", async (req, res) => {
         const u = jwt.verify(token, REFRESH_SECRET);
         const newAccess = jwt.sign({ id: u.id, email: u.email, role: u.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
         res.cookie("accessToken", newAccess, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: process.env.NODE_ENV === "production" ? "none" : "lax" });
-        res.json({ message: "Refreshed successfully" });
+        res.json({
+            message: "Refreshed successfully",
+            accessToken: newAccess,
+            token: newAccess
+        });
     } catch (err) {
         res.status(403).json({ error: "Invalid refresh token" });
     }
 });
+
 
 router.post("/forgot-password", async (req, res) => {
     const { email } = req.body;
