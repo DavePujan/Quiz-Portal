@@ -6,6 +6,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { AuthContext } from "./context/authStore";
 import { useContext, useState, useEffect } from "react";
 import { Toaster } from "react-hot-toast";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import "./styles/common.css";
 import { Menu, X, Sun, Moon } from "lucide-react";
 
@@ -164,6 +165,7 @@ function ScrollToTop() {
 export default function App() {
   return (
     <AuthProvider>
+      <SpeedInsights />
       <Toaster position="top-right" />
       <BrowserRouter>
         <ScrollToTop />

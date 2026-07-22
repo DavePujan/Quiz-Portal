@@ -31,12 +31,7 @@ export default function Login() {
         }
     }, [role, navigate, isAuthReady]);
 
-    useEffect(() => {
-        const r = searchParams.get("role");
-        if (r) {
-            login(r);
-        }
-    }, [searchParams, login]);
+
 
     async function submit(e) {
         if (e) e.preventDefault();

@@ -42,7 +42,11 @@ export function AuthProvider({ children }) {
         setRole(null);
         setUser(null);
         setProfile(null);
-        window.location.href = "/login";
+        setIsAuthReady(true);
+
+        if (window.location.pathname !== "/login" || window.location.search) {
+            window.history.replaceState({}, document.title, "/login");
+        }
     };
 
     useEffect(() => {
@@ -65,10 +69,14 @@ export function AuthProvider({ children }) {
                     localStorage.setItem("accessToken", newToken);
                     localStorage.setItem("token", newToken);
                 }
-            } catch {
-                if (!storedToken && !storedRefreshToken) {
+            } catch (err) {
+                if (err.response?.status === 401 || err.response?.status === 403 || (!storedToken && !storedRefreshToken)) {
                     localStorage.removeItem("role");
+                    localStorage.removeItem("token");
+                    localStorage.removeItem("accessToken");
+                    localStorage.removeItem("refreshToken");
                     setRole(null);
+                    setProfile(null);
                 }
             } finally {
                 setIsAuthReady(true);
