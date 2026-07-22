@@ -308,16 +308,27 @@ export default function CreateQuiz() {
                 {catalogError && <p className="mt-3 text-sm text-red-400">{catalogError}</p>}
             </div>
 
+            {/* Ask AI Assistant Option right above Section 2 */}
+            <div className="flex justify-end mb-4">
+                <button 
+                    onClick={() => setShowAiSidebar(true)}
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 bg-linear-to-r from-purple-600 to-pink-600 rounded-xl text-white font-bold hover:opacity-90 transition shadow-lg shadow-purple-500/20 text-sm"
+                >
+                    <Sparkles className="w-5 h-5 text-purple-200" />
+                    <span>Ask AI Assistant to Generate Questions</span>
+                </button>
+            </div>
+
             {/* Add Question Section */}
             <div className="bg-[#1e1e1e] p-4 sm:p-6 rounded-lg mb-8 shadow-lg border border-gray-700">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 border-b border-gray-800 pb-3">
                     <h2 className="text-lg sm:text-xl font-bold text-blue-400">2. Add Questions</h2>
                     <button 
                         onClick={() => setShowAiSidebar(true)}
-                        className="flex items-center gap-2 px-3.5 py-2 bg-linear-to-r from-purple-600 to-pink-600 rounded-lg text-white font-bold hover:opacity-90 transition shadow-lg shadow-purple-500/20 text-xs shrink-0"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/20 text-purple-300 border border-purple-500/30 rounded-lg font-bold hover:bg-purple-600 hover:text-white transition text-xs shrink-0"
                     >
-                        <Sparkles className="w-4 h-4" />
-                        <span>Ask AI Assistant</span>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>AI Assistant</span>
                     </button>
                 </div>
 
