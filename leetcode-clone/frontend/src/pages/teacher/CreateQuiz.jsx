@@ -47,8 +47,6 @@ export default function CreateQuiz() {
         image: "" // Optional Image URL
     });
 
-
-
     const [showAiSidebar, setShowAiSidebar] = useState(false);
 
     useEffect(() => {
@@ -112,7 +110,6 @@ export default function CreateQuiz() {
             return;
         }
 
-        // Validation could go here
         setQuestions([...questions, { ...currentQ }]);
         // Reset Current Question safely
         setCurrentQ({
@@ -139,7 +136,6 @@ export default function CreateQuiz() {
             alert("Please add at least one question.");
             return;
         }
-        // Validation: All fields required except description
         if (useNewAcademicModel) {
             if (!quizDetails.title || !quizDetails.courseOfferingId || !quizDetails.duration || !quizDetails.totalMarks) {
                 alert("Please fill in all Quiz Details, including a course offering.");
@@ -154,48 +150,58 @@ export default function CreateQuiz() {
 
         setSubmitting(true);
         try {
-            const hasImageUpload = questions.some(q => q.image instanceof File);
-            if (hasImageUpload && !hasValidSupabaseUploadConfig) {
-                throw new Error("Supabase image upload is not configured. Set VITE_SUPABASE_ANON_KEY in frontend/.env with your real anon key.");
-            }
-
-            // Process questions: Upload images if they are File objects
             const processedQuestions = await Promise.all(questions.map(async (q) => {
-                if (q.image && q.image instanceof File) {
-                    const fileName = `${Date.now()}_${q.image.name}`;
-                    const { error } = await supabase.storage
-                        .from("quiz_images")
-                        .upload(fileName, q.image);
+                let imageUrl = q.image;
+                if (q.image instanceof File) {
+                    if (!hasValidSupabaseUploadConfig) {
+                        alert("Supabase credentials are not configured in environment variables. Question images cannot be uploaded.");
+                        throw new Error("Missing Supabase configuration.");
+                    }
+                    const fileExt = q.image.name.split('.').pop();
+                    const fileName = `${Math.random()}.${fileExt}`;
+                    const filePath = `question-images/${fileName}`;
 
-                    if (error) throw error;
+                    const { error: uploadError } = await supabase.storage
+                        .from('quiz-assets')
+                        .upload(filePath, q.image);
 
-                    const { data } = supabase.storage
-                        .from("quiz_images")
-                        .getPublicUrl(fileName);
+                    if (uploadError) {
+                        console.error("Upload error:", uploadError);
+                        alert("Failed to upload image. Please try again.");
+                        throw uploadError;
+                    }
 
-                    return { ...q, image: data.publicUrl };
+                    const { data: urlData } = supabase.storage
+                        .from('quiz-assets')
+                        .getPublicUrl(filePath);
+
+                    imageUrl = urlData.publicUrl;
                 }
-                return q; // Already a URL or empty
+                return { ...q, image: imageUrl };
             }));
 
             const payload = {
-                ...quizDetails,
+                title: quizDetails.title,
+                duration: Number(quizDetails.duration),
+                totalMarks: Number(quizDetails.totalMarks),
+                description: quizDetails.description,
+                scheduledAt: quizDetails.scheduledAt || null,
                 questions: processedQuestions
             };
 
-            await createFullQuiz(payload);
-            alert("Quiz and Questions Created Successfully!");
-            // Optional: Redirect or reset
-            setQuestions([]);
-            setQuizDetails({ title: "", subjectId: "", courseOfferingId: "", departmentId: "", semesterId: "", duration: "", totalMarks: "", description: "", scheduledAt: "" });
-        } catch (error) {
-            console.error(error);
-            const rawMessage = error.response?.data?.error || error.message;
-            const normalizedMessage = String(rawMessage || "");
-            if (normalizedMessage.includes("Invalid Compact JWS")) {
-                alert("Error creating quiz: Invalid Supabase key detected. Update VITE_SUPABASE_ANON_KEY in frontend/.env with your real Supabase anon key and restart Vite.");
+            if (useNewAcademicModel) {
+                payload.courseOfferingId = quizDetails.courseOfferingId;
             } else {
-                alert("Error creating quiz: " + normalizedMessage);
+                payload.subjectId = quizDetails.subjectId;
+            }
+
+            await createFullQuiz(payload);
+            alert("Quiz Created Successfully!");
+            window.location.href = "/teacher";
+        } catch (err) {
+            console.error(err);
+            if (err.message !== "Missing Supabase configuration.") {
+                alert("Failed to create quiz: " + (err.response?.data?.error || err.message));
             }
         } finally {
             setSubmitting(false);
@@ -203,14 +209,19 @@ export default function CreateQuiz() {
     };
 
     return (
-        <div className="p-8 max-w-5xl mx-auto bg-black min-h-screen text-gray-300 font-sans">
-            <div className="flex justify-between items-center mb-6 border-b border-gray-700 pb-2">
-                <h1 className="text-3xl font-bold text-white">Create New Quiz</h1>
+        <div className="p-4 sm:p-6 md:p-8 w-full max-w-5xl mx-auto bg-black min-h-screen text-gray-300 font-sans">
+            {/* Page Header */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-gray-700 pb-4">
+                <div>
+                    <h1 className="text-2xl sm:text-3xl font-extrabold text-white">Create New Quiz</h1>
+                    <p className="text-xs sm:text-sm text-gray-400 mt-1">Design custom MCQs and automated coding challenges with test cases.</p>
+                </div>
                 <button 
                     onClick={() => setShowAiSidebar(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-linear-to-r from-purple-600 to-pink-600 rounded text-white font-bold hover:opacity-90 transition"
+                    className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-purple-600 to-pink-600 rounded-lg text-white font-bold hover:opacity-90 transition shadow-lg shadow-purple-500/20 text-sm shrink-0"
                 >
-                    <Sparkles className="w-4 h-4 mr-2" /><span>Ask AI</span>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Ask AI Assistant</span>
                 </button>
             </div>
 
@@ -218,31 +229,38 @@ export default function CreateQuiz() {
                 isOpen={showAiSidebar}
                 onClose={() => setShowAiSidebar(false)}
                 onPopulateForm={(q) => {
-                        setCurrentQ({
-                            question: q.question,
-                            type: q.type.toLowerCase(),
-                            marks: q.marks || 5,
-                            language: q.language || "javascript",
-                            functionName: q.functionName || "",
-                            inputFormat: q.inputFormat || "",
-                            outputFormat: q.outputFormat || "",
-                            testCases: q.testCases || [{ input: "", output: "", isHidden: false }],
-                            options: q.options || ["", "", "", ""],
-                            answer: q.answer || "",
-                            image: ""
-                        });
-                        // Optional: Scroll to form
+                    setCurrentQ({
+                        question: q.question,
+                        type: q.type.toLowerCase(),
+                        marks: q.marks || 5,
+                        language: q.language || "javascript",
+                        functionName: q.functionName || "",
+                        inputFormat: q.inputFormat || "",
+                        outputFormat: q.outputFormat || "",
+                        testCases: q.testCases || [{ input: "", output: "", isHidden: false }],
+                        options: q.options || ["", "", "", ""],
+                        answer: q.answer || "",
+                        image: ""
+                    });
+
+                    // Auto-close AI menu on small devices so inserted question is immediately visible
+                    if (window.innerWidth < 768) {
+                        setShowAiSidebar(false);
+                    }
+
+                    setTimeout(() => {
                         document.querySelector("h2.text-blue-400")?.scrollIntoView({ behavior: "smooth" });
+                    }, 100);
                 }}
             />
 
             {/* Quiz Details Section */}
-            <div className="bg-[#1e1e1e] p-6 rounded-lg mb-8 shadow-lg">
-                <h2 className="text-xl font-semibold mb-4 text-pink-400">1. Quiz Details</h2>
+            <div className="bg-[#1e1e1e] p-4 sm:p-6 rounded-lg mb-8 shadow-lg border border-gray-800">
+                <h2 className="text-lg sm:text-xl font-bold mb-4 text-pink-400">1. Quiz Details</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input name="title" placeholder="Quiz Title" value={quizDetails.title} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white" />
+                    <input name="title" placeholder="Quiz Title" value={quizDetails.title} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm" />
                     {useNewAcademicModel ? (
-                        <select name="courseOfferingId" value={quizDetails.courseOfferingId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white col-span-1 md:col-span-2">
+                        <select name="courseOfferingId" value={quizDetails.courseOfferingId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white col-span-1 md:col-span-2 text-sm">
                             <option value="">Select Course Offering</option>
                             {academicCatalog.courseOfferings?.map((co) => (
                                 <option key={co.id} value={co.id}>
@@ -252,7 +270,7 @@ export default function CreateQuiz() {
                         </select>
                     ) : (
                         <>
-                            <select name="departmentId" value={quizDetails.departmentId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white">
+                            <select name="departmentId" value={quizDetails.departmentId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm">
                                 <option value="">Select Department</option>
                                 {academicCatalog.departments?.map((department) => (
                                     <option key={department.id} value={department.id}>
@@ -261,14 +279,14 @@ export default function CreateQuiz() {
                                 ))}
                             </select>
 
-                            <select name="semesterId" value={quizDetails.semesterId} onChange={handleQuizChange} disabled={!quizDetails.departmentId} className="input bg-[#252526] border-gray-700 text-white disabled:opacity-50">
+                            <select name="semesterId" value={quizDetails.semesterId} onChange={handleQuizChange} disabled={!quizDetails.departmentId} className="input bg-[#252526] border-gray-700 text-white text-sm disabled:opacity-50">
                                 <option value="">Select Semester</option>
                                 {academicCatalog.semesters?.map((semester) => (
                                     <option key={semester.id} value={semester.id}>Semester {semester.semester_no}</option>
                                 ))}
                             </select>
 
-                            <select name="subjectId" value={quizDetails.subjectId} onChange={handleQuizChange} disabled={!quizDetails.semesterId} className="input bg-[#252526] border-gray-700 text-white disabled:opacity-50">
+                            <select name="subjectId" value={quizDetails.subjectId} onChange={handleQuizChange} disabled={!quizDetails.semesterId} className="input bg-[#252526] border-gray-700 text-white text-sm disabled:opacity-50">
                                 <option value="">Select Subject</option>
                                 {availableSubjects.map((subject) => (
                                     <option key={subject.id} value={subject.id}>
@@ -279,8 +297,8 @@ export default function CreateQuiz() {
                         </>
                     )}
 
-                    <input name="duration" placeholder="Duration (mins)" type="number" value={quizDetails.duration} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white" />
-                    <input name="totalMarks" type="number" placeholder="Total Marks" value={quizDetails.totalMarks} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white" />
+                    <input name="duration" placeholder="Duration (mins)" type="number" value={quizDetails.duration} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm" />
+                    <input name="totalMarks" type="number" placeholder="Total Marks" value={quizDetails.totalMarks} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm" />
 
                     {/* Schedule Quiz */}
                     <div className="flex flex-col">
@@ -291,94 +309,112 @@ export default function CreateQuiz() {
                             min={new Date().toISOString().slice(0, 16)}
                             value={quizDetails.scheduledAt}
                             onChange={handleQuizChange}
-                            className="input bg-[#252526] border-gray-700 text-white"
+                            className="input bg-[#252526] border-gray-700 text-white text-sm"
                         />
                     </div>
-                    <textarea name="description" placeholder="Description" value={quizDetails.description} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white col-span-2 h-20" />
+                    <textarea name="description" placeholder="Description" value={quizDetails.description} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white col-span-1 md:col-span-2 h-20 text-sm" />
                 </div>
                 {catalogError && <p className="mt-3 text-sm text-red-400">{catalogError}</p>}
             </div>
 
             {/* Add Question Section */}
-            <div className="bg-[#1e1e1e] p-6 rounded-lg mb-8 shadow-lg border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4 text-blue-400">2. Add Questions</h2>
+            <div className="bg-[#1e1e1e] p-4 sm:p-6 rounded-lg mb-8 shadow-lg border border-gray-700">
+                <h2 className="text-lg sm:text-xl font-bold mb-4 text-blue-400">2. Add Questions</h2>
 
                 {/* Question Type Selector */}
-                <div className="mb-4">
-                    <label className="mr-3 font-bold">Question Type:</label>
-                    <select
-                        value={currentQ.type}
-                        onChange={(e) => handleQChange("type", e.target.value)}
-                        className="bg-[#252526] border border-gray-600 rounded p-1 text-white"
-                    >
-                        <option value="code">Code</option>
-                        <option value="mcq">MCQ</option>
-                    </select>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 mb-4">
+                    <div className="flex items-center gap-2">
+                        <label className="font-bold text-sm text-gray-300">Question Type:</label>
+                        <select
+                            value={currentQ.type}
+                            onChange={(e) => handleQChange("type", e.target.value)}
+                            className="bg-[#252526] border border-gray-600 rounded p-2 text-white text-sm"
+                        >
+                            <option value="code">Code</option>
+                            <option value="mcq">MCQ</option>
+                        </select>
+                    </div>
 
-                    <label className="ml-6 mr-3 font-bold">Weightage:</label>
-                    <input
-                        type="number"
-                        value={currentQ.marks}
-                        onChange={(e) => handleQChange("marks", e.target.value)}
-                        className="bg-[#252526] border border-gray-600 rounded p-1 text-white w-20 text-center"
-                    />
+                    <div className="flex items-center gap-2">
+                        <label className="font-bold text-sm text-gray-300">Weightage:</label>
+                        <input
+                            type="number"
+                            value={currentQ.marks}
+                            onChange={(e) => handleQChange("marks", e.target.value)}
+                            className="bg-[#252526] border border-gray-600 rounded p-2 text-white w-24 text-center text-sm"
+                        />
+                    </div>
                 </div>
 
                 <div className="mb-4">
-                    <label className="block mb-1 text-gray-400">Question Title / Prompt:</label>
+                    <label className="block mb-1 text-xs text-gray-400 uppercase font-bold tracking-wider">Question Title / Prompt:</label>
                     <input
                         value={currentQ.question}
                         onChange={(e) => handleQChange("question", e.target.value)}
-                        className="w-full bg-[#252526] border border-gray-600 rounded p-2 text-white"
+                        className="w-full bg-[#252526] border border-gray-600 rounded p-2.5 text-white text-sm"
                         placeholder="e.g. Write a function to add two numbers..."
                     />
                 </div>
 
                 {/* Conditional Form Fields */}
                 {currentQ.type === "code" ? (
-                    <div className="bg-[#1e1e1e] border-l-4 border-blue-500 pl-4 py-2">
-                        <div className="grid grid-cols-3 gap-4 mb-4">
-                            <select value={currentQ.language} onChange={e => handleQChange("language", e.target.value)} className="input bg-[#252526] border-gray-600 text-white">
-                                <option value="javascript">JavaScript</option>
-                                <option value="python">Python</option>
-                                <option value="c">C</option>
-                                <option value="cpp">C++</option>
-                                <option value="java">Java</option>
-                                <option value="php">PHP</option>
-                            </select>
+                    <div className="bg-[#1e1e1e] border-l-4 border-blue-500 pl-3 sm:pl-4 py-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                            <div>
+                                <label className="block mb-1 text-xs text-gray-400 font-bold uppercase tracking-wider">Language:</label>
+                                <select value={currentQ.language} onChange={e => handleQChange("language", e.target.value)} className="input bg-[#252526] border-gray-600 text-white text-sm w-full">
+                                    <option value="javascript">JavaScript</option>
+                                    <option value="python">Python</option>
+                                    <option value="c">C</option>
+                                    <option value="cpp">C++</option>
+                                    <option value="java">Java</option>
+                                    <option value="php">PHP</option>
+                                </select>
+                            </div>
                         </div>
+
                         <div className="mb-4">
-                            <label className="block mb-1 text-gray-400">Function Name:</label>
+                            <label className="block mb-1 text-xs text-gray-400 font-bold uppercase tracking-wider">Function Name:</label>
                             <input
                                 placeholder="e.g. addTwo"
                                 value={currentQ.functionName}
                                 onChange={e => handleQChange("functionName", e.target.value)}
-                                className="w-full bg-[#252526] border border-gray-600 rounded p-2 text-white"
+                                className="w-full bg-[#252526] border border-gray-600 rounded p-2 text-white text-sm"
                             />
                         </div>
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                            <input placeholder="Input Format (e.g. a, b)" value={currentQ.inputFormat} onChange={e => handleQChange("inputFormat", e.target.value)} className="input bg-[#252526] border-gray-600 text-white" />
-                            <input placeholder="Output Format (e.g. sum)" value={currentQ.outputFormat} onChange={e => handleQChange("outputFormat", e.target.value)} className="input bg-[#252526] border-gray-600 text-white" />
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label className="block mb-1 text-xs text-gray-400 font-bold uppercase tracking-wider">Input Format:</label>
+                                <input placeholder="e.g. a, b" value={currentQ.inputFormat} onChange={e => handleQChange("inputFormat", e.target.value)} className="input bg-[#252526] border-gray-600 text-white text-sm w-full" />
+                            </div>
+                            <div>
+                                <label className="block mb-1 text-xs text-gray-400 font-bold uppercase tracking-wider">Output Format:</label>
+                                <input placeholder="e.g. sum" value={currentQ.outputFormat} onChange={e => handleQChange("outputFormat", e.target.value)} className="input bg-[#252526] border-gray-600 text-white text-sm w-full" />
+                            </div>
                         </div>
 
                         <div className="mb-2">
-                            <p className="mb-2 font-semibold">Test Cases:</p>
+                            <p className="mb-2 font-bold text-xs uppercase tracking-wider text-gray-400">Test Cases:</p>
                             {currentQ.testCases.map((tc, i) => (
-                                <div key={i} className="flex gap-2 mb-2 items-center">
-                                    <span className="text-gray-500">{i + 1})</span>
-                                    <input placeholder="Input" value={tc.input} onChange={e => handleTestCaseChange(i, "input", e.target.value)} className="flex-1 bg-[#2d2d2d] border border-gray-600 rounded p-1 text-green-400 font-mono text-sm" />
-                                    <ArrowRight className="text-gray-500 w-4 h-4 mx-2" />
-                                    <input placeholder="Output" value={tc.output} onChange={e => handleTestCaseChange(i, "output", e.target.value)} className="flex-1 bg-[#2d2d2d] border border-gray-600 rounded p-1 text-green-400 font-mono text-sm" />
-                                    <button onClick={() => removeTestCase(i)} className="text-red-500 hover:text-red-400 px-2"><X className="w-4 h-4" /></button>
+                                <div key={i} className="flex flex-col sm:flex-row gap-2 mb-3 items-stretch sm:items-center bg-[#252526] sm:bg-transparent p-2.5 sm:p-0 rounded border sm:border-0 border-gray-700">
+                                    <span className="text-gray-500 text-xs font-bold shrink-0">{i + 1})</span>
+                                    <input placeholder="Input" value={tc.input} onChange={e => handleTestCaseChange(i, "input", e.target.value)} className="flex-1 bg-[#2d2d2d] border border-gray-600 rounded p-2 text-green-400 font-mono text-sm min-w-0" />
+                                    <ArrowRight className="hidden sm:block text-gray-500 w-4 h-4 shrink-0 mx-1" />
+                                    <input placeholder="Output" value={tc.output} onChange={e => handleTestCaseChange(i, "output", e.target.value)} className="flex-1 bg-[#2d2d2d] border border-gray-600 rounded p-2 text-green-400 font-mono text-sm min-w-0" />
+                                    <button onClick={() => removeTestCase(i)} className="text-red-400 hover:text-red-300 p-1.5 self-end sm:self-center font-bold text-xs flex items-center gap-1 border sm:border-0 border-red-500/20 rounded">
+                                        <X className="w-4 h-4" />
+                                        <span className="sm:hidden">Remove</span>
+                                    </button>
                                 </div>
                             ))}
-                            <button onClick={addTestCase} className="text-sm text-blue-400 hover:underline">+ Add Test Case</button>
+                            <button onClick={addTestCase} className="text-xs font-bold text-blue-400 hover:underline mt-1">+ Add Test Case</button>
                         </div>
                     </div>
                 ) : (
-                    <div className="bg-[#1e1e1e] border-l-4 border-yellow-500 pl-4 py-2">
+                    <div className="bg-[#1e1e1e] border-l-4 border-yellow-500 pl-3 sm:pl-4 py-2">
                         <div className="mb-4">
-                            <label className="block mb-1 text-gray-400">Optional Image:</label>
+                            <label className="block mb-1 text-xs text-gray-400 font-bold uppercase tracking-wider">Optional Image:</label>
                             {currentQ.image ? (
                                 <div className="flex items-center gap-4 bg-[#252526] p-2 rounded border border-green-500">
                                     <span className="text-green-400 text-sm truncate max-w-xs">
@@ -393,8 +429,8 @@ export default function CreateQuiz() {
                                 </div>
                             ) : (
                                 <div>
-                                    <label className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded inline-flex items-center transition">
-                                        <span>+ Select Image</span>
+                                    <label className="cursor-pointer bg-[#252526] border border-gray-600 hover:border-gray-500 px-4 py-2 rounded inline-block text-sm font-semibold text-gray-300">
+                                        Upload Image
                                         <input
                                             type="file"
                                             className="hidden"
@@ -411,37 +447,37 @@ export default function CreateQuiz() {
                             )}
                         </div>
 
-                        <p className="mb-2 font-semibold">Options:</p>
+                        <p className="mb-2 font-bold text-xs uppercase tracking-wider text-gray-400">Options:</p>
                         {currentQ.options.map((opt, i) => (
                             <div key={i} className="mb-2 flex items-center gap-2">
-                                <span className="text-gray-400">Option {i + 1}:</span>
-                                <input value={opt} onChange={e => handleOptionChange(i, e.target.value)} className="flex-1 bg-[#252526] border border-gray-600 rounded p-2 text-white" />
+                                <span className="text-xs font-bold text-gray-400 w-16 shrink-0">Opt {i + 1}:</span>
+                                <input value={opt} onChange={e => handleOptionChange(i, e.target.value)} className="flex-1 bg-[#252526] border border-gray-600 rounded p-2 text-white text-sm" />
                             </div>
                         ))}
-                        <p className="mt-2 mb-1 font-semibold">Correct Answer (must match option text exactly):</p>
-                        <input value={currentQ.answer} onChange={e => handleQChange("answer", e.target.value)} className="w-full bg-[#252526] border border-gray-600 rounded p-2 text-white" placeholder="Copy correct option here" />
+                        <p className="mt-3 mb-1 font-bold text-xs uppercase tracking-wider text-gray-400">Correct Answer (must match option text):</p>
+                        <input value={currentQ.answer} onChange={e => handleQChange("answer", e.target.value)} className="w-full bg-[#252526] border border-gray-600 rounded p-2 text-white text-sm" placeholder="Copy correct option here" />
                     </div>
                 )}
 
-                <button onClick={addQuestion} className="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded transition">
+                <button onClick={addQuestion} className="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition text-sm">
                     + Add Question to Quiz
                 </button>
             </div>
 
             {/* Questions List Review */}
             {questions.length > 0 && (
-                <div className="bg-[#1e1e1e] p-6 rounded-lg mb-8 shadow-lg">
-                    <h2 className="text-xl font-semibold mb-4 text-green-400">3. Review Questions ({questions.length})</h2>
+                <div className="bg-[#1e1e1e] p-4 sm:p-6 rounded-lg mb-8 shadow-lg border border-gray-800">
+                    <h2 className="text-lg sm:text-xl font-bold mb-4 text-green-400">3. Review Questions ({questions.length})</h2>
                     <div className="space-y-4">
                         {questions.map((q, i) => (
-                            <div key={i} className="bg-[#252526] p-4 rounded border border-gray-700 flex justify-between items-start">
-                                <div>
-                                    <h3 className="font-bold text-white text-lg"><span className="text-gray-500">Q{i + 1}.</span> {q.question}</h3>
-                                    <p className="text-sm text-gray-400">Type: <span className="uppercase text-yellow-500">{q.type}</span> | Marks: {q.marks}</p>
-                                    {q.type === 'mcq' && <p className="text-xs text-gray-500 mt-1">Answer: {q.answer}</p>}
+                            <div key={i} className="bg-[#252526] p-4 rounded-lg border border-gray-700 flex justify-between items-start gap-4">
+                                <div className="min-w-0">
+                                    <h3 className="font-bold text-white text-base truncate"><span className="text-gray-500">Q{i + 1}.</span> {q.question}</h3>
+                                    <p className="text-xs text-gray-400 mt-1">Type: <span className="uppercase text-yellow-500 font-bold">{q.type}</span> | Marks: {q.marks}</p>
+                                    {q.type === 'mcq' && <p className="text-xs text-gray-500 mt-1 truncate">Answer: {q.answer}</p>}
                                     {q.type === 'code' && <p className="text-xs text-gray-500 mt-1">Lang: {q.language} | Function: {q.functionName || "N/A"} | Cases: {q.testCases.length}</p>}
                                 </div>
-                                <button onClick={() => deleteQuestion(i)} className="text-red-500 hover:text-red-400">Delete</button>
+                                <button onClick={() => deleteQuestion(i)} className="text-xs font-bold text-red-400 hover:text-red-300 shrink-0">Delete</button>
                             </div>
                         ))}
                     </div>
@@ -452,7 +488,7 @@ export default function CreateQuiz() {
             <button
                 onClick={handleSubmit}
                 disabled={submitting}
-                className={`w-full font-bold py-4 rounded-lg text-xl shadow-lg transition transform hover:scale-[1.01] ${submitting
+                className={`w-full font-bold py-4 rounded-lg text-lg sm:text-xl shadow-lg transition transform hover:scale-[1.01] ${submitting
                     ? "bg-gray-600 cursor-wait"
                     : "bg-green-600 hover:bg-green-700 text-white"
                     }`}
@@ -488,7 +524,6 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
             getAiProviders()
                 .then(res => {
                     setProviders(res.data.providers);
-                    // Auto-select the first configured provider
                     const configured = res.data.providers.find(p => p.configured);
                     if (configured) setSelectedProvider(configured.id);
                 })
@@ -533,10 +568,12 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
     };
 
     return (
-        <div className={`fixed right-0 top-0 h-full w-125 bg-[#18181b] border-l border-gray-700 shadow-2xl z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className={`fixed right-0 top-0 h-full w-full sm:w-112 md:w-125 max-w-full bg-[#18181b] border-l border-gray-700 shadow-2xl z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
             <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-[#252526]">
-                <h3 className="text-lg font-bold text-transparent bg-clip-text bg-linear-to-r from-purple-400 to-pink-600 flex items-center"><Sparkles className="w-5 h-5 mr-2 text-purple-400" /> AI Assistant</h3>
-                <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
+                <h3 className="text-lg font-bold text-transparent bg-clip-text bg-linear-to-r from-purple-400 to-pink-600 flex items-center">
+                    <Sparkles className="w-5 h-5 mr-2 text-purple-400" /> AI Assistant
+                </h3>
+                <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10"><X className="w-5 h-5" /></button>
             </div>
             
             <div className="p-4 flex-1 overflow-y-auto">
@@ -544,7 +581,6 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
                     <div className="text-center text-gray-500 mt-10">Loading providers...</div>
                 ) : (
                     <>
-                        {/* Provider Selector */}
                         {hasConfiguredProviders && (
                             <div className="mb-4">
                                 <label className="block text-xs text-gray-500 uppercase tracking-wider font-bold mb-2">AI Provider</label>
@@ -568,7 +604,6 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
                             </div>
                         )}
 
-                        {/* Not Configured Warning */}
                         {!isConfigured ? (
                             <div className="bg-yellow-900/20 border border-yellow-700/50 p-4 rounded-lg text-sm text-yellow-200 space-y-3">
                                 <div className="flex items-start gap-2">
@@ -593,7 +628,6 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
                             </div>
                         ) : (
                             <>
-                                {/* Prompt Input */}
                                 <div className="mb-4">
                                     <textarea 
                                         value={prompt}
@@ -604,13 +638,12 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
                                     <button 
                                         onClick={handleGenerate}
                                         disabled={loading || !prompt.trim()}
-                                        className={`w-full mt-2 py-2 rounded font-bold text-sm transition ${loading ? 'bg-gray-700' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}
+                                        className={`w-full mt-2 py-2.5 rounded-lg font-bold text-sm transition ${loading ? 'bg-gray-700' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}
                                     >
                                         {loading ? "Generating..." : `Generate with ${currentProvider?.name || selectedProvider}`}
                                     </button>
                                 </div>
 
-                                {/* Inline Error Banner */}
                                 {generateError && (
                                     <div className="mb-3 p-3 rounded-lg bg-red-950/60 border border-red-700/50 text-red-300 text-xs leading-relaxed">
                                         {generateError}
@@ -618,33 +651,35 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
                                     </div>
                                 )}
 
-                                {/* Generated Questions */}
-                                <div className="space-y-4">
+                                <div className="space-y-3">
                                     {generatedQuestions.map((q, i) => (
-                                        <div key={i} className="bg-[#2a2a2b] border border-gray-700 rounded p-3 relative group">
+                                        <div key={i} className="bg-[#2a2a2b] border border-gray-700 rounded-lg p-3 relative group">
                                             <div className="pr-16 cursor-pointer" onClick={() => toggleExpand(i)}>
-                                                <p className="font-semibold text-sm text-white">{q.question}</p>
+                                                <p className="font-semibold text-sm text-white leading-snug">{q.question}</p>
                                                 <p className="text-xs text-gray-400 mt-1 uppercase font-bold">{q.type} • {q.marks} Marks</p>
                                             </div>
 
-                                            {/* Action Buttons */}
-                                            <div className="absolute top-2 right-2 flex gap-2">
-                                                 <button 
-                                                    onClick={() => onPopulateForm(q)}
-                                                    className="bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white px-2 py-1 rounded text-xs font-bold transition"
-                                                    title="Edit in Form"
+                                            <div className="absolute top-2 right-2">
+                                                <button 
+                                                    onClick={() => {
+                                                        onPopulateForm(q);
+                                                        if (window.innerWidth < 768) {
+                                                            onClose();
+                                                        }
+                                                    }}
+                                                    className="bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white px-3 py-1.5 rounded-md text-xs font-bold transition"
+                                                    title="Edit & Insert in Form"
                                                 >
                                                     Edit
                                                 </button>
                                             </div>
 
-                                            {/* Expanded Details */}
                                             {expandedQ === i && (
                                                 <div className="mt-3 pt-3 border-t border-gray-700 text-xs text-gray-300 space-y-2">
                                                     {q.type === 'mcq' && (
                                                         <>
                                                             <p><span className="text-gray-500">Options:</span> {q.options?.join(", ")}</p>
-                                                            <p><span className="text-green-400">Answer:</span> {q.answer}</p>
+                                                            <p><span className="text-green-400 font-bold">Answer:</span> {q.answer}</p>
                                                         </>
                                                     )}
                                                     {q.type === 'code' && (
@@ -656,11 +691,11 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
                                                             <p><span className="text-gray-500">Input:</span> {q.inputFormat}</p>
                                                             <p><span className="text-gray-500">Output:</span> {q.outputFormat}</p>
                                                             <div className="bg-[#202021] p-2 rounded">
-                                                                <p className="text-gray-500 mb-1">Test Cases:</p>
+                                                                <p className="text-gray-500 mb-1 font-bold">Test Cases:</p>
                                                                 {q.testCases?.map((tc, idx) => (
                                                                     <div key={idx} className="flex gap-2 font-mono text-[10px] text-green-400">
                                                                         <span>in: {tc.input}</span>
-                                                                        <ArrowRight className="w-4 h-4 mx-2 text-gray-500 inline" />
+                                                                        <ArrowRight className="w-3 h-3 mx-1 text-gray-500 inline" />
                                                                         <span>out: {tc.output}</span>
                                                                     </div>
                                                                 ))}
