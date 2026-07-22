@@ -223,19 +223,22 @@ router.get("/academics", auth, authorize('teacher'), requireInstitutionContext, 
     }
 });
 
-async function ensureQuestionFunctionNameColumn() {
-    await pool.query(`
-        ALTER TABLE questions
-        ADD COLUMN IF NOT EXISTS function_name TEXT;
-    `);
+let teacherDdlChecked = false;
+async function ensureTeacherDDL() {
+    if (teacherDdlChecked) return;
+    try {
+        await pool.query(`
+            ALTER TABLE questions ADD COLUMN IF NOT EXISTS function_name TEXT;
+            ALTER TABLE profiles ADD COLUMN IF NOT EXISTS enrollment_no TEXT;
+            ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS is_practice BOOLEAN DEFAULT false;
+        `);
+        teacherDdlChecked = true;
+    } catch (e) {
+        console.error("Teacher DDL check error:", e.message);
+    }
 }
-
-async function ensureProfileEnrollmentColumn() {
-    await pool.query(`
-        ALTER TABLE profiles
-        ADD COLUMN IF NOT EXISTS enrollment_no TEXT;
-    `);
-}
+async function ensureQuestionFunctionNameColumn() { return ensureTeacherDDL(); }
+async function ensureProfileEnrollmentColumn() { return ensureTeacherDDL(); }
 
 function getTeacherDepartmentScope(req) {
     const scope = req.context;
@@ -428,12 +431,22 @@ router.post("/quiz/:id/end", auth, authorize('teacher'), async (req, res) => {
     }
 });
 
+const evaluationsLocalCache = new Map();
+
 // Evaluations
 router.get("/evaluations", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
     try {
-        await ensureProfileEnrollmentColumn();
         const userId = req.context.userId;
         const scope = getTeacherDepartmentScope(req);
+        const cacheKey = `${userId}:${scope.departmentId}:${scope.institutionId}`;
+
+        const cached = evaluationsLocalCache.get(cacheKey);
+        if (cached && Date.now() < cached.expiresAt) {
+            return res.json(cached.data);
+        }
+
+        ensureTeacherDDL();
+
         const result = await pool.query(`
             SELECT
                 qa.id,
@@ -468,6 +481,8 @@ router.get("/evaluations", auth, authorize('teacher'), requireInstitutionContext
             quiz: item.quiz_title || "Unknown",
             status: item.status
         }));
+
+        evaluationsLocalCache.set(cacheKey, { data: formatted, expiresAt: Date.now() + 15000 });
 
         res.json(formatted);
     } catch (err) {
@@ -694,9 +709,17 @@ router.get("/settings/gemini-key", auth, authorize('teacher'), async (req, res) 
     }
 });
 
+const aiProvidersCache = new Map();
+
 // Get all AI provider statuses for the logged-in teacher
 router.get("/settings/ai-providers", auth, authorize('teacher'), async (req, res) => {
     try {
+        const cacheKey = req.user.email;
+        const cached = aiProvidersCache.get(cacheKey);
+        if (cached && Date.now() < cached.expiresAt) {
+            return res.json(cached.data);
+        }
+
         const { rows } = await pool.query(`
             SELECT pr.code, uk.encrypted_api_key
             FROM profiles p
@@ -713,13 +736,17 @@ router.get("/settings/ai-providers", auth, authorize('teacher'), async (req, res
             return key.length > 8 ? "****" + key.slice(-4) : "****";
         };
 
-        res.json({
+        const responseData = {
             providers: Object.values(AI_PROVIDER_METADATA).map((provider) => ({
                 ...provider,
                 configured: keyByProvider.has(provider.id),
                 maskedKey: maskKey(keyByProvider.get(provider.id))
             }))
-        });
+        };
+
+        aiProvidersCache.set(cacheKey, { data: responseData, expiresAt: Date.now() + 60000 });
+
+        res.json(responseData);
     } catch (err) {
         console.error("Get AI Providers Error:", err);
         res.status(500).json({ error: err.message });
@@ -743,6 +770,7 @@ router.post("/settings/ai-key", auth, authorize('teacher'), async (req, res) => 
         }
 
         await upsertTeacherApiKey(req.user.email, provider, apiKey);
+        aiProvidersCache.delete(req.user.email);
         res.json({ message: `${provider} API key saved successfully.` });
     } catch (err) {
         console.error("Save AI Key Error:", err);
@@ -763,6 +791,7 @@ router.delete("/settings/ai-key", auth, authorize('teacher'), async (req, res) =
         }
 
         await deleteTeacherApiKey(req.user.email, provider);
+        aiProvidersCache.delete(req.user.email);
         res.json({ message: `${provider} API key removed.` });
     } catch (err) {
         console.error("Remove AI Key Error:", err);

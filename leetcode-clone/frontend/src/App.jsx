@@ -56,8 +56,10 @@ function NavBar() {
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  // Don't show Navbar for Teacher/Admin as they have Sidebar
-  // Also don't show for Quiz Attempt page
+  useEffect(() => {
+    setIsMenuOpen(false);
+  }, [location.pathname]);
+
   if (
     role === "teacher" ||
     role === "admin" ||
@@ -68,86 +70,144 @@ function NavBar() {
     location.pathname === "/"
   ) return null;
 
+  const isActive = (path) => location.pathname === path;
+
+  const linkClass = (path) => `
+    flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 text-sm font-medium
+    ${isActive(path)
+      ? "bg-primary text-white shadow-lg shadow-primary/25 font-semibold"
+      : "text-gray-400 hover:bg-white/5 hover:text-white"
+    }
+  `;
+
   return (
-    <nav className="flex flex-col px-6 py-4 bg-background-layer1 border-b border-gray-800 sticky top-0 z-50 shadow-md">
-      <div className="flex items-center justify-between w-full">
-        <Link to={token ? (role === 'teacher' ? "/teacher" : role === 'admin' ? "/admin" : "/student/dashboard") : "/"} className="text-2xl font-bold bg-clip-text text-transparent bg-linear-to-r from-blue-400 to-purple-500 mr-8 tracking-tight">
-          QuizPortal
-        </Link>
+    <>
+      <nav className="flex flex-col px-4 sm:px-6 py-3 bg-[#0a0a0a] border-b border-gray-800 sticky top-0 z-40 shadow-md">
+        <div className="flex items-center justify-between w-full">
+          <Link to={token ? (role === 'teacher' ? "/teacher" : role === 'admin' ? "/admin" : "/student/dashboard") : "/"} className="text-xl sm:text-2xl font-bold bg-clip-text text-transparent bg-linear-to-r from-blue-400 to-purple-500 mr-8 tracking-tight">
+            QuizPortal
+          </Link>
 
-        {/* Desktop Menu */}
-        <div className="hidden md:flex items-center space-x-6">
-          {role === "student" && (
-            <>
-              <Link to="/student/dashboard" className="text-sm font-medium text-gray-400 hover:text-white transition-colors">Active Quizzes</Link>
-              <Link to="/leaderboard" className="text-sm font-medium text-gray-400 hover:text-white transition-colors">Leaderboard</Link>
-              <Link to="/upcoming" className="text-sm font-medium text-gray-400 hover:text-white transition-colors">Upcoming Quizzes</Link>
-              <Link to="/history" className="text-sm font-medium text-gray-400 hover:text-white transition-colors">History</Link>
-              <Link to="/student/analysis" className="text-sm font-medium text-gray-400 hover:text-white transition-colors">Analysis</Link>
-              <Link to="/student/practice" className="text-sm font-medium text-gray-400 hover:text-white transition-colors">Practice</Link>
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center gap-4">
-          {profile && (
-            <div className="hidden md:flex flex-col text-right border-r border-gray-800 pr-4">
-              <span className="text-sm font-semibold text-white leading-tight">{profile.name}</span>
-              <span className="text-[10px] text-gray-400 mt-0.5 leading-none">
-                {profile.college} &bull; <span className="text-primary">{profile.department}</span>
-              </span>
-            </div>
-          )}
-          <button
-            onClick={toggleTheme}
-            className="px-3 py-2 text-sm text-gray-400 hover:bg-white/5 hover:text-white rounded-lg border border-gray-800 transition-colors flex items-center justify-center"
-            title="Toggle theme"
-          >
-            {theme === "light" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-          
-          {/* Desktop Logout */}
-          <div className="hidden md:block">
-            {token ? (
-              <button onClick={logout} className="px-4 py-2 text-sm font-medium text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition-colors">
-                Logout ({role})
-              </button>
-            ) : (
-              <Link to="/login" className="px-5 py-2 text-sm font-bold text-white bg-primary rounded-lg shadow-lg hover:bg-primary-hover transition-colors">
-                Login
-              </Link>
+          {/* Desktop Menu */}
+          <div className="hidden md:flex items-center space-x-6">
+            {role === "student" && (
+              <>
+                <Link to="/student/dashboard" className={`text-sm font-medium transition-colors ${isActive('/student/dashboard') ? 'text-blue-400 font-bold' : 'text-gray-400 hover:text-white'}`}>Active Quizzes</Link>
+                <Link to="/leaderboard" className={`text-sm font-medium transition-colors ${isActive('/leaderboard') ? 'text-blue-400 font-bold' : 'text-gray-400 hover:text-white'}`}>Leaderboard</Link>
+                <Link to="/upcoming" className={`text-sm font-medium transition-colors ${isActive('/upcoming') ? 'text-blue-400 font-bold' : 'text-gray-400 hover:text-white'}`}>Upcoming Quizzes</Link>
+                <Link to="/history" className={`text-sm font-medium transition-colors ${isActive('/history') ? 'text-blue-400 font-bold' : 'text-gray-400 hover:text-white'}`}>History</Link>
+                <Link to="/student/analysis" className={`text-sm font-medium transition-colors ${isActive('/student/analysis') ? 'text-blue-400 font-bold' : 'text-gray-400 hover:text-white'}`}>Analysis</Link>
+                <Link to="/student/practice" className={`text-sm font-medium transition-colors ${isActive('/student/practice') ? 'text-blue-400 font-bold' : 'text-gray-400 hover:text-white'}`}>Practice</Link>
+              </>
             )}
           </div>
 
-          {/* Mobile Menu Toggle */}
-          {role === "student" && (
-            <button
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="md:hidden text-gray-400 hover:text-white focus:outline-none"
-            >
-              {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-            </button>
-          )}
-        </div>
-      </div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            {role && (
+              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-primary/20 text-primary border border-primary/30 font-bold">
+                {role}
+              </span>
+            )}
 
-      {/* Mobile Dropdown Menu */}
-      {isMenuOpen && role === "student" && (
-        <div className="md:hidden mt-4 pb-2 border-t border-gray-800 pt-4 flex flex-col space-y-3 animation-fade-in">
-          <Link to="/student/dashboard" onClick={() => setIsMenuOpen(false)} className="text-base font-medium text-gray-400 hover:text-white transition-colors pl-2">Active Quizzes</Link>
-          <Link to="/leaderboard" onClick={() => setIsMenuOpen(false)} className="text-base font-medium text-gray-400 hover:text-white transition-colors pl-2">Leaderboard</Link>
-          <Link to="/upcoming" onClick={() => setIsMenuOpen(false)} className="text-base font-medium text-gray-400 hover:text-white transition-colors pl-2">Upcoming Quizzes</Link>
-          <Link to="/history" onClick={() => setIsMenuOpen(false)} className="text-base font-medium text-gray-400 hover:text-white transition-colors pl-2">History</Link>
-          <Link to="/student/analysis" onClick={() => setIsMenuOpen(false)} className="text-base font-medium text-gray-400 hover:text-white transition-colors pl-2">Analysis</Link>
-          <Link to="/student/practice" onClick={() => setIsMenuOpen(false)} className="text-base font-medium text-gray-400 hover:text-white transition-colors pl-2">Practice</Link>
-          {token && (
-            <button onClick={logout} className="text-left text-base font-medium text-red-400 hover:text-red-300 transition-colors pl-2 pt-2 border-t border-gray-800 mt-2">
-              Logout
+            {profile && (
+              <div className="hidden md:flex flex-col text-right border-r border-gray-800 pr-4">
+                <span className="text-sm font-semibold text-white leading-tight">{profile.name}</span>
+                <span className="text-[10px] text-gray-400 mt-0.5 leading-none">
+                  {profile.college} &bull; <span className="text-primary">{profile.department}</span>
+                </span>
+              </div>
+            )}
+            
+            <button
+              onClick={toggleTheme}
+              className="p-2 text-gray-400 hover:text-white rounded-lg border border-gray-800 transition-colors flex items-center justify-center"
+              title="Toggle theme"
+            >
+              {theme === "light" ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-          )}
+            
+            {/* Desktop Logout */}
+            <div className="hidden md:block">
+              {token ? (
+                <button onClick={logout} className="px-4 py-2 text-sm font-medium text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition-colors">
+                  Logout ({role})
+                </button>
+              ) : (
+                <Link to="/login" className="px-5 py-2 text-sm font-bold text-white bg-primary rounded-lg shadow-lg hover:bg-primary-hover transition-colors">
+                  Login
+                </Link>
+              )}
+            </div>
+
+            {/* Mobile Menu Toggle button matching Teacher Sidebar */}
+            {role === "student" && (
+              <button
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                className="md:hidden p-2 text-gray-300 hover:text-white focus:outline-none rounded-lg border border-gray-800 bg-white/5"
+                aria-label="Toggle menu"
+              >
+                {isMenuOpen ? <X size={20} /> : <Menu size={20} />}
+              </button>
+            )}
+          </div>
+        </div>
+      </nav>
+
+      {/* Mobile Slide-Over Menu Drawer matching Teacher Panel style */}
+      {isMenuOpen && role === "student" && (
+        <div 
+          className="md:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex flex-col justify-between p-4 bg-[#0a0a0a] animate-in fade-in duration-200"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsMenuOpen(false);
+          }}
+        >
+          <div className="flex flex-col h-full overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-gray-800">
+              <div>
+                <span className="text-xl font-bold bg-clip-text text-transparent bg-linear-to-r from-blue-400 to-purple-500">
+                  QuizPortal
+                </span>
+                <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mt-0.5">Student Navigation</p>
+              </div>
+              <button
+                onClick={() => setIsMenuOpen(false)}
+                className="p-2 text-gray-400 hover:text-white rounded-lg border border-gray-800"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <nav className="flex-1 space-y-1">
+              <Link to="/student/dashboard" className={linkClass("/student/dashboard")}>Active Quizzes</Link>
+              <Link to="/leaderboard" className={linkClass("/leaderboard")}>Leaderboard</Link>
+              <Link to="/upcoming" className={linkClass("/upcoming")}>Upcoming Quizzes</Link>
+              <Link to="/history" className={linkClass("/history")}>History</Link>
+              <Link to="/student/analysis" className={linkClass("/student/analysis")}>Analysis</Link>
+              <Link to="/student/practice" className={linkClass("/student/practice")}>Practice</Link>
+            </nav>
+
+            <div className="pt-4 mt-6 border-t border-gray-800">
+              {profile && (
+                <div className="px-4 py-3 mb-3 bg-white/5 rounded-lg border border-white/10">
+                  <p className="text-sm font-bold text-white truncate">{profile.name}</p>
+                  <p className="text-xs text-gray-400 truncate mt-0.5">{profile.college}</p>
+                  <p className="text-xs text-primary truncate uppercase tracking-widest mt-1 font-semibold">{profile.department} Dept</p>
+                </div>
+              )}
+
+              {token && (
+                <button
+                  onClick={logout}
+                  className="flex items-center justify-center gap-2 w-full px-4 py-3 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors border border-red-500/20 font-medium"
+                >
+                  <span>Sign Out</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
-    </nav>
+    </>
   );
 }
 

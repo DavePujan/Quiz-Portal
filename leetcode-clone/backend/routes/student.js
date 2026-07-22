@@ -177,22 +177,46 @@ async function persistBehaviorForAttempt(userId, quizId, attemptId) {
     return { score, risk };
 }
 
+let studentDdlChecked = false;
+async function ensureStudentDDL() {
+    if (studentDdlChecked) return;
+    try {
+        await pool.query(`
+            ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS is_practice BOOLEAN DEFAULT false;
+        `);
+        studentDdlChecked = true;
+    } catch (e) {
+        console.error("Student DDL error:", e.message);
+    }
+}
+
 // Get All Practice Quizzes Added by Teachers
 router.get("/quizzes/practice", auth, async (req, res) => {
     try {
-        await pool.query(`
-            ALTER TABLE quizzes
-            ADD COLUMN IF NOT EXISTS is_practice BOOLEAN DEFAULT false;
-        `);
+        await ensureStudentDDL();
 
-        const { data: quizzes, error } = await supabase
-            .from("quizzes")
-            .select("*, creator:profiles!created_by(full_name, email)")
-            .eq("is_practice", true)
-            .order("created_at", { ascending: false });
+        let quizzes = [];
+        try {
+            const resData = await pool.query(`
+                SELECT q.*, p.full_name AS creator_name, p.email AS creator_email
+                FROM quizzes q
+                LEFT JOIN profiles p ON p.id = q.created_by
+                WHERE q.is_practice = true OR q.quiz_type = 'practice'
+                ORDER BY q.created_at DESC
+            `);
+            quizzes = resData.rows.map(q => ({
+                ...q,
+                creator: { full_name: q.creator_name, email: q.creator_email }
+            }));
+        } catch (dbErr) {
+            const { data } = await supabase
+                .from("quizzes")
+                .select("*, creator:profiles!created_by(full_name, email)")
+                .order("created_at", { ascending: false });
+            quizzes = (data || []).filter(q => q.is_practice || q.quiz_type === "practice");
+        }
 
-        if (error) throw error;
-        res.json(quizzes || []);
+        res.json(quizzes);
     } catch (err) {
         console.error("Fetch Teacher Practice Quizzes Error:", err);
         res.status(500).json({ error: err.message });
@@ -202,24 +226,33 @@ router.get("/quizzes/practice", auth, async (req, res) => {
 // Get All Active/Scheduled Real Quizzes for Students
 router.get("/quizzes", auth, async (req, res) => {
     try {
-        let query;
-        if (FEATURES.NEW_ACADEMIC_MODEL) {
-            query = supabase
-                .from("quizzes")
-                .select("*, course_offering:course_offerings(teacher:profiles!teacher_id(full_name, email))")
-                .or("is_practice.is.null,is_practice.eq.false")
-                .order("created_at", { ascending: false });
-        } else {
-            query = supabase
+        await ensureStudentDDL();
+
+        let quizzes = [];
+        try {
+            const quizzesRes = await pool.query(`
+                SELECT 
+                    q.*,
+                    p.full_name AS creator_name,
+                    p.email AS creator_email
+                FROM quizzes q
+                LEFT JOIN profiles p ON p.id = q.created_by
+                WHERE (q.is_practice IS NOT TRUE AND COALESCE(q.quiz_type, '') != 'practice')
+                  AND (q.is_archived IS NOT TRUE)
+                ORDER BY q.created_at DESC
+            `);
+            quizzes = quizzesRes.rows.map(q => ({
+                ...q,
+                creator: { full_name: q.creator_name, email: q.creator_email }
+            }));
+        } catch (dbErr) {
+            console.warn("[Student Quizzes Fallback] Pool query failed, trying basic select:", dbErr.message);
+            const { data } = await supabase
                 .from("quizzes")
                 .select("*, creator:profiles!created_by(full_name, email)")
-                .or("is_practice.is.null,is_practice.eq.false")
                 .order("created_at", { ascending: false });
+            quizzes = (data || []).filter(q => !q.is_practice && q.quiz_type !== "practice");
         }
-
-        const { data: quizzes, error } = await query;
-
-        if (error) throw error;
 
         console.log(`[Student] Fetching quizzes for ${req.user.email} (ID: ${req.user.id})`);
         console.log(`[Student] Found ${quizzes?.length || 0} quizzes`);
