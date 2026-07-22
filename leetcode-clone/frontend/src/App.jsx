@@ -7,6 +7,7 @@ import { AuthContext } from "./context/authStore";
 import { useContext, useState, useEffect } from "react";
 import { Toaster } from "react-hot-toast";
 import { SpeedInsights } from "@vercel/speed-insights/react";
+import { Analytics } from "@vercel/analytics/react";
 import "./styles/common.css";
 import { Menu, X, Sun, Moon } from "lucide-react";
 
@@ -166,6 +167,7 @@ export default function App() {
   return (
     <AuthProvider>
       <SpeedInsights />
+      <Analytics />
       <Toaster position="top-right" />
       <BrowserRouter>
         <ScrollToTop />

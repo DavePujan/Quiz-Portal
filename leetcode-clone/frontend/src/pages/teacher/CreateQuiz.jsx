@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Sparkles, ArrowRight, X, Rocket, ChevronDown, Settings, AlertCircle } from "lucide-react";
+import { Sparkles, ArrowRight, X, Rocket, ChevronDown, Settings, AlertCircle, Target, BookOpen } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import api, { createFullQuiz, getAcademicCatalog, getAiProviders } from "../../utils/api";
 import { FEATURES } from "../../config/features";
@@ -70,10 +70,41 @@ export default function CreateQuiz() {
         });
     };
 
-    const availableSubjects = academicCatalog.subjects?.filter((subject) =>
-        String(subject.department_id) === String(quizDetails.departmentId) &&
-        String(subject.semester_id) === String(quizDetails.semesterId)
-    ) || [];
+    const availableSemesters = React.useMemo(() => {
+        if (!quizDetails.departmentId) return [];
+        
+        const deptSems = academicCatalog.semesters?.filter(
+            s => !s.department_id || String(s.department_id) === String(quizDetails.departmentId)
+        ) || [];
+        
+        const semMap = new Map();
+        deptSems.forEach(s => {
+            const semNo = Number(s.semester_no || s.term_number);
+            if (semNo && !semMap.has(semNo)) {
+                semMap.set(semNo, { id: semNo, semester_no: semNo });
+            }
+        });
+        
+        if (semMap.size === 0) {
+            for (let i = 1; i <= 8; i++) {
+                semMap.set(i, { id: i, semester_no: i });
+            }
+        }
+        
+        return Array.from(semMap.values()).sort((a, b) => a.semester_no - b.semester_no);
+    }, [academicCatalog.semesters, quizDetails.departmentId]);
+
+    const availableSubjects = React.useMemo(() => {
+        if (!quizDetails.departmentId || !quizDetails.semesterId) return [];
+        const selectedSemNo = Number(quizDetails.semesterId);
+        
+        return academicCatalog.subjects?.filter((subject) => {
+            const matchDept = !subject.department_id || String(subject.department_id) === String(quizDetails.departmentId);
+            const subjectSemNo = Number(subject.semester_no || subject.term_number || subject.academic_term_id);
+            const matchSem = subjectSemNo === selectedSemNo || String(subject.semester_id) === String(quizDetails.semesterId);
+            return matchDept && matchSem;
+        }) || [];
+    }, [academicCatalog.subjects, quizDetails.departmentId, quizDetails.semesterId]);
 
     const useNewAcademicModel = FEATURES.NEW_ACADEMIC_MODEL;
 
@@ -213,7 +244,7 @@ export default function CreateQuiz() {
     };
 
     return (
-        <div className="p-4 sm:p-6 md:p-8 w-full max-w-5xl mx-auto bg-black min-h-screen text-gray-300 font-sans">
+        <div className="p-4 sm:p-6 md:p-8 w-full max-w-5xl mx-auto bg-black min-h-screen text-gray-300 font-sans overflow-x-hidden">
             {/* Page Header */}
             <div className="mb-6 border-b border-gray-700 pb-4">
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-white">Create New Quiz</h1>
@@ -276,8 +307,8 @@ export default function CreateQuiz() {
 
                             <select name="semesterId" value={quizDetails.semesterId} onChange={handleQuizChange} disabled={!quizDetails.departmentId} className="input bg-[#252526] border-gray-700 text-white text-sm disabled:opacity-50">
                                 <option value="">Select Semester</option>
-                                {academicCatalog.semesters?.map((semester) => (
-                                    <option key={semester.id} value={semester.id}>Semester {semester.semester_no}</option>
+                                {availableSemesters.map((semester) => (
+                                    <option key={semester.id} value={semester.semester_no}>Semester {semester.semester_no}</option>
                                 ))}
                             </select>
 
@@ -311,10 +342,12 @@ export default function CreateQuiz() {
                                         : "bg-[#252526] border-gray-700 text-gray-400 hover:text-gray-200"
                                 }`}
                             >
-                                <div className="flex items-center gap-2.5">
-                                    <span className="text-lg">🎯</span>
-                                    <div>
-                                        <p className="font-bold text-white">Real Assessment Quiz</p>
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+                                        <Target className="w-4 h-4 text-blue-400" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-white truncate">Real Assessment Quiz</p>
                                         <p className="text-[10px] text-gray-400 font-normal leading-tight mt-0.5">
                                             {quizDetails.scheduledAt ? "Scheduled Quiz for future start" : "Active Quiz for live exam grading"}
                                         </p>
@@ -332,10 +365,12 @@ export default function CreateQuiz() {
                                         : "bg-[#252526] border-gray-700 text-gray-400 hover:text-gray-200"
                                 }`}
                             >
-                                <div className="flex items-center gap-2.5">
-                                    <span className="text-lg">💡</span>
-                                    <div>
-                                        <p className="font-bold text-white">Practice Quiz (Teacher Added)</p>
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0">
+                                        <BookOpen className="w-4 h-4 text-purple-400" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-white truncate">Practice Quiz (Teacher Added)</p>
                                         <p className="text-[10px] text-gray-400 font-normal leading-tight mt-0.5">Untimed practice added to Student Practice Portal</p>
                                     </div>
                                 </div>
@@ -585,7 +620,7 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
         mistral: "mistral-small-latest"
     };
 
-    React.useEffect(() => {
+    useEffect(() => {
         if (isOpen && providers.length === 0) {
             getAiProviders()
                 .then(res => {
@@ -634,150 +669,163 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
     };
 
     return (
-        <div className={`fixed right-0 top-0 h-full w-full sm:w-112 md:w-125 max-w-full bg-[#18181b] border-l border-gray-700 shadow-2xl z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-            <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-[#252526]">
-                <h3 className="text-lg font-bold text-transparent bg-clip-text bg-linear-to-r from-purple-400 to-pink-600 flex items-center">
-                    <Sparkles className="w-5 h-5 mr-2 text-purple-400" /> AI Assistant
-                </h3>
-                <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10"><X className="w-5 h-5" /></button>
-            </div>
-            
-            <div className="p-4 flex-1 overflow-y-auto">
-                {providersLoading ? (
-                    <div className="text-center text-gray-500 mt-10">Loading providers...</div>
-                ) : (
-                    <>
-                        {hasConfiguredProviders && (
-                            <div className="mb-4">
-                                <label className="block text-xs text-gray-500 uppercase tracking-wider font-bold mb-2">AI Provider</label>
-                                <div className="relative">
-                                    <select
-                                        value={selectedProvider}
-                                        onChange={(e) => setSelectedProvider(e.target.value)}
-                                        className="w-full appearance-none bg-[#2a2a2b] border border-gray-600 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500 cursor-pointer pr-10"
-                                    >
-                                        {configuredProviders.map(p => (
-                                            <option key={p.id} value={p.id}>
-                                                {p.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                                </div>
-                                {currentProvider && (
-                                    <p className="text-xs text-gray-500 mt-1.5">{currentProvider.description}</p>
-                                )}
-                            </div>
-                        )}
+        <>
+            {/* Backdrop Overlay */}
+            {isOpen && (
+                <div 
+                    className="fixed inset-0 bg-black/70 backdrop-blur-xs z-[55] transition-opacity"
+                    onClick={onClose}
+                />
+            )}
 
-                        {!isConfigured ? (
-                            <div className="bg-yellow-900/20 border border-yellow-700/50 p-4 rounded-lg text-sm text-yellow-200 space-y-3">
-                                <div className="flex items-start gap-2">
-                                    <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                                    <div>
-                                        <p className="font-semibold">
-                                            {!hasConfiguredProviders ? "No AI Providers Configured" : `${currentProvider?.name || selectedProvider} is not configured.`}
-                                        </p>
-                                        <p className="text-yellow-300/70 mt-1">
-                                            {!hasConfiguredProviders ? "Please configure at least one API key in Settings to use the AI assistant." : "Add your API key in Settings to use this provider."}
-                                        </p>
+            {/* Sidebar Drawer */}
+            <div className={`fixed right-0 top-0 bottom-0 h-full w-full sm:w-112 md:w-125 max-w-full bg-[#18181b] border-l border-gray-700 shadow-2xl z-[60] transform transition-transform duration-300 ease-in-out flex flex-col overflow-x-hidden ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+                <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-[#252526] shrink-0">
+                    <h3 className="text-base sm:text-lg font-bold text-transparent bg-clip-text bg-linear-to-r from-purple-400 to-pink-600 flex items-center">
+                        <Sparkles className="w-5 h-5 mr-2 text-purple-400 shrink-0" /> AI Assistant
+                    </h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 active:scale-95 transition">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+                
+                <div className="p-4 flex-1 overflow-y-auto space-y-4">
+                    {providersLoading ? (
+                        <div className="text-center text-gray-500 py-10 text-sm">Loading AI providers...</div>
+                    ) : (
+                        <>
+                            {hasConfiguredProviders && (
+                                <div className="mb-2">
+                                    <label className="block text-xs text-gray-400 uppercase tracking-wider font-bold mb-1.5">AI Provider</label>
+                                    <div className="relative">
+                                        <select
+                                            value={selectedProvider}
+                                            onChange={(e) => setSelectedProvider(e.target.value)}
+                                            className="w-full appearance-none bg-[#2a2a2b] border border-gray-600 rounded-lg px-3.5 py-2.5 text-xs sm:text-sm text-white focus:outline-none focus:border-purple-500 cursor-pointer pr-10"
+                                        >
+                                            {configuredProviders.map(p => (
+                                                <option key={p.id} value={p.id}>
+                                                    {p.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                                     </div>
+                                    {currentProvider && (
+                                        <p className="text-[11px] text-gray-400 mt-1">{currentProvider.description}</p>
+                                    )}
                                 </div>
-                                <Link
-                                    to="/teacher/settings"
-                                    onClick={onClose}
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-700/30 hover:bg-yellow-700/50 border border-yellow-600/30 rounded-lg text-sm font-medium text-yellow-200 transition-colors"
-                                >
-                                    <Settings className="w-4 h-4" />
-                                    Go to Settings
-                                </Link>
-                            </div>
-                        ) : (
-                            <>
-                                <div className="mb-4">
-                                    <textarea 
-                                        value={prompt}
-                                        onChange={(e) => setPrompt(e.target.value)}
-                                        placeholder="Describe your questions..."
-                                        className="w-full bg-[#2a2a2b] border border-gray-600 rounded p-3 text-sm text-white h-32 resize-none"
-                                    />
-                                    <button 
-                                        onClick={handleGenerate}
-                                        disabled={loading || !prompt.trim()}
-                                        className={`w-full mt-2 py-2.5 rounded-lg font-bold text-sm transition ${loading ? 'bg-gray-700' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}
-                                    >
-                                        {loading ? "Generating..." : `Generate with ${currentProvider?.name || selectedProvider}`}
-                                    </button>
-                                </div>
+                            )}
 
-                                {generateError && (
-                                    <div className="mb-3 p-3 rounded-lg bg-red-950/60 border border-red-700/50 text-red-300 text-xs leading-relaxed">
-                                        {generateError}
-                                        <button onClick={() => setGenerateError(null)} className="ml-2 text-red-400 hover:text-white font-bold">✕</button>
-                                    </div>
-                                )}
-
-                                <div className="space-y-3">
-                                    {generatedQuestions.map((q, i) => (
-                                        <div key={i} className="bg-[#2a2a2b] border border-gray-700 rounded-lg p-3 relative group">
-                                            <div className="pr-16 cursor-pointer" onClick={() => toggleExpand(i)}>
-                                                <p className="font-semibold text-sm text-white leading-snug">{q.question}</p>
-                                                <p className="text-xs text-gray-400 mt-1 uppercase font-bold">{q.type} • {q.marks} Marks</p>
-                                            </div>
-
-                                            <div className="absolute top-2 right-2">
-                                                <button 
-                                                    onClick={() => {
-                                                        onPopulateForm(q);
-                                                        if (window.innerWidth < 768) {
-                                                            onClose();
-                                                        }
-                                                    }}
-                                                    className="bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white px-3 py-1.5 rounded-md text-xs font-bold transition"
-                                                    title="Edit & Insert in Form"
-                                                >
-                                                    Edit
-                                                </button>
-                                            </div>
-
-                                            {expandedQ === i && (
-                                                <div className="mt-3 pt-3 border-t border-gray-700 text-xs text-gray-300 space-y-2">
-                                                    {q.type === 'mcq' && (
-                                                        <>
-                                                            <p><span className="text-gray-500">Options:</span> {q.options?.join(", ")}</p>
-                                                            <p><span className="text-green-400 font-bold">Answer:</span> {q.answer}</p>
-                                                        </>
-                                                    )}
-                                                    {q.type === 'code' && (
-                                                        <>
-                                                            <div className="grid grid-cols-2 gap-2">
-                                                                <p><span className="text-gray-500">Lang:</span> {q.language}</p>
-                                                                <p><span className="text-gray-500">Function:</span> <span className="text-mono text-yellow-500">{q.functionName || "N/A"}</span></p>
-                                                            </div>
-                                                            <p><span className="text-gray-500">Input:</span> {q.inputFormat}</p>
-                                                            <p><span className="text-gray-500">Output:</span> {q.outputFormat}</p>
-                                                            <div className="bg-[#202021] p-2 rounded">
-                                                                <p className="text-gray-500 mb-1 font-bold">Test Cases:</p>
-                                                                {q.testCases?.map((tc, idx) => (
-                                                                    <div key={idx} className="flex gap-2 font-mono text-[10px] text-green-400">
-                                                                        <span>in: {tc.input}</span>
-                                                                        <ArrowRight className="w-3 h-3 mx-1 text-gray-500 inline" />
-                                                                        <span>out: {tc.output}</span>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </>
-                                                    )}
-                                                </div>
-                                            )}
+                            {!isConfigured ? (
+                                <div className="bg-yellow-900/20 border border-yellow-700/50 p-4 rounded-lg text-xs sm:text-sm text-yellow-200 space-y-3">
+                                    <div className="flex items-start gap-2">
+                                        <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                                        <div>
+                                            <p className="font-semibold">
+                                                {!hasConfiguredProviders ? "No AI Providers Configured" : `${currentProvider?.name || selectedProvider} is not configured.`}
+                                            </p>
+                                            <p className="text-yellow-300/70 mt-1 text-xs">
+                                                {!hasConfiguredProviders ? "Please configure at least one API key in Settings to use the AI assistant." : "Add your API key in Settings to use this provider."}
+                                            </p>
                                         </div>
-                                    ))}
+                                    </div>
+                                    <Link
+                                        to="/teacher/settings"
+                                        onClick={onClose}
+                                        className="inline-flex items-center gap-2 px-3.5 py-2 bg-yellow-700/30 hover:bg-yellow-700/50 border border-yellow-600/30 rounded-lg text-xs font-medium text-yellow-200 transition-colors"
+                                    >
+                                        <Settings className="w-4 h-4" />
+                                        Go to Settings
+                                    </Link>
                                 </div>
-                            </>
-                        )}
-                    </>
-                )}
+                            ) : (
+                                <>
+                                    <div>
+                                        <textarea 
+                                            value={prompt}
+                                            onChange={(e) => setPrompt(e.target.value)}
+                                            placeholder="Describe your questions (e.g. Generate 3 Data Structures MCQs with explanations)..."
+                                            className="w-full bg-[#2a2a2b] border border-gray-600 rounded-lg p-3 text-xs sm:text-sm text-white h-28 sm:h-32 resize-none outline-none focus:border-purple-500"
+                                        />
+                                        <button 
+                                            onClick={handleGenerate}
+                                            disabled={loading || !prompt.trim()}
+                                            className={`w-full mt-2.5 py-2.5 sm:py-3 rounded-lg font-bold text-xs sm:text-sm transition active:scale-[0.99] shadow-lg shadow-purple-500/10 ${loading ? 'bg-gray-700 cursor-wait text-gray-400' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}
+                                        >
+                                            {loading ? "Generating Questions..." : `Generate with ${currentProvider?.name || selectedProvider}`}
+                                        </button>
+                                    </div>
+
+                                    {generateError && (
+                                        <div className="p-3 rounded-lg bg-red-950/60 border border-red-700/50 text-red-300 text-xs leading-relaxed flex items-center justify-between">
+                                            <span>{generateError}</span>
+                                            <button onClick={() => setGenerateError(null)} className="ml-2 text-red-400 hover:text-white font-bold p-1">✕</button>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-3 pt-2">
+                                        {generatedQuestions.map((q, i) => (
+                                            <div key={i} className="bg-[#2a2a2b] border border-gray-700 rounded-lg p-3 sm:p-3.5 relative group break-words min-w-0">
+                                                <div className="pr-16 cursor-pointer" onClick={() => toggleExpand(i)}>
+                                                    <p className="font-semibold text-xs sm:text-sm text-white leading-snug break-words">{q.question}</p>
+                                                    <p className="text-[10px] sm:text-xs text-gray-400 mt-1 uppercase font-bold tracking-wider">{q.type} • {q.marks} Marks</p>
+                                                </div>
+
+                                                <div className="absolute top-3 right-3">
+                                                    <button 
+                                                        onClick={() => {
+                                                            onPopulateForm(q);
+                                                            if (window.innerWidth < 768) {
+                                                                onClose();
+                                                            }
+                                                        }}
+                                                        className="bg-purple-600/20 text-purple-300 border border-purple-500/30 hover:bg-purple-600 hover:text-white px-3 py-1.5 rounded-md text-xs font-bold transition active:scale-95"
+                                                        title="Edit & Insert in Form"
+                                                    >
+                                                        Edit & Insert
+                                                    </button>
+                                                </div>
+
+                                                {expandedQ === i && (
+                                                    <div className="mt-3 pt-3 border-t border-gray-700/80 text-xs text-gray-300 space-y-2 break-words">
+                                                        {q.type === 'mcq' && (
+                                                            <>
+                                                                <p className="break-words"><span className="text-gray-400 font-medium">Options:</span> {q.options?.join(", ")}</p>
+                                                                <p className="break-words"><span className="text-green-400 font-bold">Answer:</span> {q.answer}</p>
+                                                            </>
+                                                        )}
+                                                        {q.type === 'code' && (
+                                                            <>
+                                                                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                                                    <p><span className="text-gray-400 font-medium">Lang:</span> {q.language}</p>
+                                                                    <p><span className="text-gray-400 font-medium">Function:</span> <span className="font-mono text-yellow-400">{q.functionName || "N/A"}</span></p>
+                                                                </div>
+                                                                <p className="text-[11px] break-words"><span className="text-gray-400 font-medium">Input:</span> {q.inputFormat}</p>
+                                                                <p className="text-[11px] break-words"><span className="text-gray-400 font-medium">Output:</span> {q.outputFormat}</p>
+                                                                <div className="bg-[#1e1e1f] p-2 rounded-md border border-gray-800">
+                                                                    <p className="text-gray-400 mb-1 font-bold text-[10px] uppercase">Test Cases:</p>
+                                                                    {q.testCases?.map((tc, idx) => (
+                                                                        <div key={idx} className="flex flex-wrap gap-1 font-mono text-[10px] text-green-400 break-all">
+                                                                            <span>in: {tc.input}</span>
+                                                                            <ArrowRight className="w-3 h-3 text-gray-500 shrink-0 self-center" />
+                                                                            <span>out: {tc.output}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </>
+                    )}
+                </div>
             </div>
-        </div>
+        </>
     );
 }

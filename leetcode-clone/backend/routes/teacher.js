@@ -310,6 +310,8 @@ router.get("/dashboard", auth, authorize('teacher'), requireInstitutionContext, 
             pool.query(`
                 SELECT COUNT(*) AS count
                 FROM quiz_attempts qa
+                JOIN quizzes q ON q.id = qa.quiz_id
+                LEFT JOIN course_offerings co ON co.id = q.course_offering_id
                 JOIN institution_memberships student_membership
                   ON student_membership.user_id = qa.user_id
                  AND student_membership.is_active = true
@@ -317,7 +319,9 @@ router.get("/dashboard", auth, authorize('teacher'), requireInstitutionContext, 
                  AND student_membership.institution_id = $2
                  AND student_membership.department_id = $1
                 WHERE qa.status = 'submitted'
-            `, [scope.departmentId, scope.institutionId]),
+                  AND (q.is_practice IS NOT TRUE AND COALESCE(q.quiz_type, '') != 'practice')
+                  AND (q.created_by = $3 OR co.teacher_id = $3)
+            `, [scope.departmentId, scope.institutionId, userId]),
             pool.query(`
                 SELECT COUNT(DISTINCT student_membership.user_id) AS count
                 FROM institution_memberships student_membership
@@ -428,6 +432,7 @@ router.post("/quiz/:id/end", auth, authorize('teacher'), async (req, res) => {
 router.get("/evaluations", auth, authorize('teacher'), requireInstitutionContext, async (req, res) => {
     try {
         await ensureProfileEnrollmentColumn();
+        const userId = req.context.userId;
         const scope = getTeacherDepartmentScope(req);
         const result = await pool.query(`
             SELECT
@@ -441,6 +446,7 @@ router.get("/evaluations", auth, authorize('teacher'), requireInstitutionContext
             FROM quiz_attempts qa
             JOIN profiles p ON p.id = qa.user_id
             JOIN quizzes q ON q.id = qa.quiz_id
+            LEFT JOIN course_offerings co ON co.id = q.course_offering_id
             JOIN institution_memberships student_membership
               ON student_membership.user_id = p.id
              AND student_membership.is_active = true
@@ -448,8 +454,10 @@ router.get("/evaluations", auth, authorize('teacher'), requireInstitutionContext
              AND student_membership.institution_id = $2
              AND student_membership.department_id = $1
             WHERE qa.status = 'submitted'
+              AND (q.is_practice IS NOT TRUE AND COALESCE(q.quiz_type, '') != 'practice')
+              AND (q.created_by = $3 OR co.teacher_id = $3)
             ORDER BY qa.completed_at DESC NULLS LAST, qa.started_at DESC NULLS LAST
-        `, [scope.departmentId, scope.institutionId]);
+        `, [scope.departmentId, scope.institutionId, userId]);
 
         // Transform for frontend
         const formatted = result.rows.map(item => ({

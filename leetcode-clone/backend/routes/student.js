@@ -613,14 +613,16 @@ router.post("/quiz/:id/attempt", auth, async (req, res) => {
             .limit(1)
             .maybeSingle();
 
-        // Fetch total marks so percentages and ranking are computed correctly.
+        // Fetch total marks & quiz type so practice quizzes are auto-evaluated
         const { data: quizMeta, error: quizMetaError } = await supabase
             .from("quizzes")
-            .select("total_marks")
+            .select("total_marks, is_practice, quiz_type")
             .eq("id", id)
             .single();
         if (quizMetaError) throw quizMetaError;
         const totalMarks = Number(quizMeta?.total_marks || 0);
+        const isPractice = quizMeta?.is_practice === true || quizMeta?.quiz_type === 'practice';
+        const finalStatus = isPractice ? "evaluated" : "submitted";
 
         let attempt = inProgressAttempt;
         if (!attempt) {
@@ -702,8 +704,8 @@ router.post("/quiz/:id/attempt", auth, async (req, res) => {
             });
         }
 
-        // 4. Update Attempt Score (keep status as submitted so it appears in teacher evaluations)
-        await supabase.from("quiz_attempts").update({ score: totalScore, status: "submitted" }).eq("id", attempt.id);
+        // 4. Update Attempt Score & Status (auto-evaluated for practice quizzes, submitted for real quizzes)
+        await supabase.from("quiz_attempts").update({ score: totalScore, status: finalStatus }).eq("id", attempt.id);
 
         // 5. Replace answer details for this attempt (idempotent submit path)
         await supabase.from("quiz_answers").delete().eq("attempt_id", attempt.id);
@@ -717,7 +719,7 @@ router.post("/quiz/:id/attempt", auth, async (req, res) => {
             .from("quiz_attempts")
             .update({
                 score: totalScore,
-                status: "submitted",
+                status: finalStatus,
                 total_marks: totalMarks,
                 completed_at: new Date()
             })
