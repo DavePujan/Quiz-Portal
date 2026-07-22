@@ -105,34 +105,36 @@ export default function EvaluationViewer() {
     };
 
     return (
-        <div className="p-6 text-gray-300">
-            <h1 className="text-xl font-semibold mb-4 text-white">Answer Evaluation</h1>
+        <div className="p-4 sm:p-6 md:p-8 max-w-5xl mx-auto text-gray-300">
+            <h1 className="text-2xl sm:text-3xl font-extrabold mb-6 bg-clip-text text-transparent bg-linear-to-r from-blue-400 to-purple-500">
+                Answer Evaluation
+            </h1>
 
             {submission && (
-                <div className="bg-[#1e1e1e] shadow rounded p-4 mb-4 border border-gray-700">
-                    <div className="flex justify-between items-center mb-4">
+                <div className="bg-[#1e1e1e] shadow-xl rounded-xl p-4 sm:p-6 mb-6 border border-gray-700">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
                         <div>
-                            <p className="font-semibold text-gray-200">Student: {submission.student}</p>
-                            <p className="text-sm text-gray-400">Enrollment No: {submission.enrollmentNo || "-"}</p>
-                            <p className="text-sm text-gray-400">Quiz: {submission.quiz}</p>
-                            <p className="text-sm text-gray-400">Total Score: {submission.score}</p>
-                            <p className="text-sm text-gray-400">Timer: {formatDuration(liveSeconds)}</p>
+                            <p className="font-bold text-white text-lg">{submission.student}</p>
+                            <p className="text-xs text-gray-400 font-mono mt-0.5">Enrollment No: {submission.enrollmentNo || "-"}</p>
+                            <p className="text-xs text-gray-300 mt-1 font-medium">Quiz: <span className="text-primary">{submission.quiz}</span></p>
+                            <p className="text-xs text-gray-400 mt-0.5">Total Score: <span className="text-green-400 font-bold">{submission.score}</span></p>
+                            <p className="text-xs text-gray-400 font-mono mt-0.5">Timer: {formatDuration(liveSeconds)}</p>
                             {submission.quizDurationMinutes && (
-                                <p className="text-xs text-gray-500">Quiz Duration: {submission.quizDurationMinutes} min</p>
+                                <p className="text-[10px] text-gray-500 mt-0.5">Quiz Duration: {submission.quizDurationMinutes} min</p>
                             )}
                         </div>
-                        <div className="flex flex-col items-end gap-2">
+                        <div className="w-full sm:w-auto flex flex-col sm:items-end gap-2">
                             {providersLoading ? (
-                                <span className="text-sm text-gray-500">Loading AI...</span>
+                                <span className="text-xs text-gray-500">Loading AI...</span>
                             ) : (
                                 <>
                                     {hasConfiguredProviders ? (
-                                        <div className="flex items-center gap-2">
-                                            <div className="relative">
+                                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full">
+                                            <div className="relative w-full sm:w-auto">
                                                 <select
                                                     value={selectedProvider}
                                                     onChange={(e) => setSelectedProvider(e.target.value)}
-                                                    className="appearance-none bg-[#2a2a2b] border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500 cursor-pointer pr-8"
+                                                    className="w-full appearance-none bg-[#2a2a2b] border border-gray-600 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 cursor-pointer pr-8"
                                                 >
                                                     {configuredProviders.map(p => (
                                                         <option key={p.id} value={p.id}>{p.name}</option>
@@ -143,21 +145,22 @@ export default function EvaluationViewer() {
                                             <button
                                                 onClick={handleAutoEvaluate}
                                                 disabled={loading || !isConfigured}
-                                                className={`px-4 py-2 rounded text-white font-medium whitespace-nowrap ${loading || !isConfigured ? "bg-gray-600" : "bg-purple-600 hover:bg-purple-700"}`}
+                                                className={`w-full sm:w-auto px-4 py-2 rounded-lg text-white font-bold text-xs whitespace-nowrap shadow-lg ${loading || !isConfigured ? "bg-gray-600" : "bg-purple-600 hover:bg-purple-700 shadow-purple-500/20"}`}
                                             >
                                                 {loading ? "Evaluating..." : "Auto Evaluate with AI"}
                                             </button>
                                         </div>
                                     ) : (
-                                        <div className="flex items-center gap-2 bg-yellow-900/20 border border-yellow-700/50 px-3 py-2 rounded text-sm text-yellow-200">
-                                            <AlertCircle className="w-4 h-4" />
+                                        <div className="flex flex-wrap items-center gap-2 bg-yellow-900/20 border border-yellow-700/50 px-3 py-2 rounded-lg text-xs text-yellow-200">
+                                            <AlertCircle className="w-4 h-4 shrink-0" />
                                             <span>No AI Configured</span>
-                                            <Link to="/teacher/settings" className="flex items-center gap-1 ml-2 text-yellow-400 hover:text-yellow-300 underline">
-                                                <Settings className="w-4 h-4" /> Settings
+                                            <Link to="/teacher/settings" className="flex items-center gap-1 ml-1 text-yellow-400 hover:text-yellow-300 underline font-bold">
+                                                <Settings className="w-3.5 h-3.5" /> Settings
                                             </Link>
                                         </div>
                                     )}
                                 </>
+
                             )}
                         </div>
                     </div>

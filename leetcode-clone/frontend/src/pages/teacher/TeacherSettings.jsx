@@ -230,34 +230,34 @@ export default function TeacherSettings() {
             </div>
 
             {/* Provider Cards */}
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
                 {providers.map((provider) => (
                     <div
                         key={provider.id}
                         className="bg-[#1e1e1e] border border-gray-800 rounded-xl overflow-hidden transition-all hover:border-gray-700"
                     >
                         {/* Card Header */}
-                        <div className="p-5 flex items-start justify-between">
-                            <div className="flex items-start gap-4">
-                                <div className="w-12 h-12 rounded-lg bg-[#252526] border border-gray-700 flex items-center justify-center shrink-0">
+                        <div className="p-4 sm:p-5 flex flex-col sm:flex-row items-start justify-between gap-4">
+                            <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-[#252526] border border-gray-700 flex items-center justify-center shrink-0">
                                     {PROVIDER_ICONS[provider.id]}
                                 </div>
-                                <div>
-                                    <div className="flex items-center gap-3">
-                                        <h3 className="text-lg font-bold text-white">{provider.name}</h3>
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                                        <h3 className="text-base sm:text-lg font-bold text-white leading-snug">{provider.name}</h3>
                                         {provider.configured ? (
-                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-900/30 text-green-400 border border-green-700/30">
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-green-900/30 text-green-400 border border-green-700/30">
                                                 <CheckCircle className="w-3 h-3" /> Configured
                                             </span>
                                         ) : (
-                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-800 text-gray-400 border border-gray-700">
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-gray-800 text-gray-400 border border-gray-700">
                                                 Not configured
                                             </span>
                                         )}
                                     </div>
-                                    <p className="text-sm text-gray-400 mt-1">{provider.description}</p>
+                                    <p className="text-xs sm:text-sm text-gray-400 mt-1 leading-relaxed">{provider.description}</p>
                                     {provider.configured && provider.maskedKey && (
-                                        <p className="text-xs text-gray-500 mt-2 font-mono bg-[#252526] inline-block px-2 py-1 rounded">
+                                        <p className="text-[11px] text-gray-500 mt-2 font-mono bg-[#252526] inline-block px-2 py-1 rounded border border-white/5">
                                             <Key className="w-3 h-3 inline mr-1" />
                                             {provider.maskedKey}
                                         </p>
@@ -265,27 +265,29 @@ export default function TeacherSettings() {
                                 </div>
                             </div>
 
-                            <div className="flex gap-2 shrink-0">
+                            <div className="flex items-center gap-1.5 self-end sm:self-start shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-gray-800/60 w-full sm:w-auto justify-end">
                                 <a
                                     href={provider.docsUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                                    className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors flex items-center gap-1 text-xs"
                                     title="View docs"
                                 >
                                     <ExternalLink className="w-4 h-4" />
+                                    <span className="sm:hidden text-xs">Docs</span>
                                 </a>
                                 {provider.configured && (
                                     <button
                                         onClick={() => handleRemoveKey(provider.id)}
                                         disabled={removing === provider.id}
-                                        className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                                        className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1 text-xs"
                                         title="Remove key"
                                     >
                                         {removing === provider.id
                                             ? <Loader2 className="w-4 h-4 animate-spin" />
                                             : <Trash2 className="w-4 h-4" />
                                         }
+                                        <span className="sm:hidden text-xs">Remove</span>
                                     </button>
                                 )}
                             </div>
@@ -293,8 +295,9 @@ export default function TeacherSettings() {
 
                         {/* Key Input Section */}
                         {activeProvider === provider.id ? (
-                            <div className="px-5 pb-5 border-t border-gray-800 pt-4">
-                                <div className="flex gap-2">
+                            <div className="px-4 sm:px-5 pb-4 sm:pb-5 border-t border-gray-800 pt-4">
+                                <div className="flex flex-col sm:flex-row gap-2">
+
                                     <div className="relative flex-1">
                                         <input
                                             type={showKey ? "text" : "password"}
