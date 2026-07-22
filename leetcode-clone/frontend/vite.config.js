@@ -7,7 +7,7 @@ export default defineConfig({
   build: {
     target: "esnext",
     cssCodeSplit: true,
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -18,13 +18,6 @@ export default defineConfig({
             if (id.includes('@supabase')) {
               return 'supabase';
             }
-            if (id.includes('lucide-react')) {
-              return 'icons';
-            }
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
-              return 'vendor-core';
-            }
-            return 'vendor-deps';
           }
         }
       }
