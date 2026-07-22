@@ -211,18 +211,9 @@ export default function CreateQuiz() {
     return (
         <div className="p-4 sm:p-6 md:p-8 w-full max-w-5xl mx-auto bg-black min-h-screen text-gray-300 font-sans">
             {/* Page Header */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-gray-700 pb-4">
-                <div>
-                    <h1 className="text-2xl sm:text-3xl font-extrabold text-white">Create New Quiz</h1>
-                    <p className="text-xs sm:text-sm text-gray-400 mt-1">Design custom MCQs and automated coding challenges with test cases.</p>
-                </div>
-                <button 
-                    onClick={() => setShowAiSidebar(true)}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-purple-600 to-pink-600 rounded-lg text-white font-bold hover:opacity-90 transition shadow-lg shadow-purple-500/20 text-sm shrink-0"
-                >
-                    <Sparkles className="w-4 h-4" />
-                    <span>Ask AI Assistant</span>
-                </button>
+            <div className="mb-6 border-b border-gray-700 pb-4">
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-white">Create New Quiz</h1>
+                <p className="text-xs sm:text-sm text-gray-400 mt-1">Design custom MCQs and automated coding challenges with test cases.</p>
             </div>
 
             <AiSidebar 
@@ -319,7 +310,16 @@ export default function CreateQuiz() {
 
             {/* Add Question Section */}
             <div className="bg-[#1e1e1e] p-4 sm:p-6 rounded-lg mb-8 shadow-lg border border-gray-700">
-                <h2 className="text-lg sm:text-xl font-bold mb-4 text-blue-400">2. Add Questions</h2>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 border-b border-gray-800 pb-3">
+                    <h2 className="text-lg sm:text-xl font-bold text-blue-400">2. Add Questions</h2>
+                    <button 
+                        onClick={() => setShowAiSidebar(true)}
+                        className="flex items-center gap-2 px-3.5 py-2 bg-linear-to-r from-purple-600 to-pink-600 rounded-lg text-white font-bold hover:opacity-90 transition shadow-lg shadow-purple-500/20 text-xs shrink-0"
+                    >
+                        <Sparkles className="w-4 h-4" />
+                        <span>Ask AI Assistant</span>
+                    </button>
+                </div>
 
                 {/* Question Type Selector */}
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 mb-4">
