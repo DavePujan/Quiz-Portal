@@ -876,7 +876,7 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
         // Fetch valid UUID from Supabase profiles
         const { data: profile, error } = await supabase
             .from("profiles")
-            .select("id, department, institution_id")
+            .select("id, department")
             .ilike("email", req.user.email)
             .single();
 
@@ -884,7 +884,7 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
         const userId = profile.id;
 
         // Resolve teacher's institution ID with rock-solid fallbacks
-        let teacherInstitutionId = req.context?.institutionId || profile?.institution_id || null;
+        let teacherInstitutionId = req.context?.institutionId || null;
 
         if (!teacherInstitutionId) {
             const { data: member } = await supabase
