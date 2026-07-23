@@ -169,14 +169,23 @@ export default function CreateQuiz() {
             alert("Please add at least one question.");
             return;
         }
+        const isPracticeQuiz = quizDetails.quizCategory === "practice";
         if (useNewAcademicModel) {
-            if (!quizDetails.title || !quizDetails.courseOfferingId || !quizDetails.duration || !quizDetails.totalMarks) {
+            if (!isPracticeQuiz && !quizDetails.courseOfferingId) {
                 alert("Please fill in all Quiz Details, including a course offering.");
                 return;
             }
+            if (!quizDetails.title || !quizDetails.duration || !quizDetails.totalMarks) {
+                alert("Please fill in all Quiz Details.");
+                return;
+            }
         } else {
-            if (!quizDetails.title || !quizDetails.subjectId || !quizDetails.duration || !quizDetails.totalMarks) {
+            if (!isPracticeQuiz && !quizDetails.subjectId) {
                 alert("Please fill in all Quiz Details, including a subject.");
+                return;
+            }
+            if (!quizDetails.title || !quizDetails.duration || !quizDetails.totalMarks) {
+                alert("Please fill in all Quiz Details.");
                 return;
             }
         }
@@ -219,15 +228,27 @@ export default function CreateQuiz() {
                 totalMarks: Number(quizDetails.totalMarks),
                 description: quizDetails.description,
                 scheduledAt: quizDetails.scheduledAt || null,
-                isPractice: quizDetails.quizCategory === "practice",
+                isPractice: isPracticeQuiz,
                 quizCategory: quizDetails.quizCategory,
                 questions: processedQuestions
             };
 
-            if (useNewAcademicModel) {
-                payload.courseOfferingId = quizDetails.courseOfferingId;
+            if (!isPracticeQuiz) {
+                if (useNewAcademicModel) {
+                    payload.courseOfferingId = quizDetails.courseOfferingId;
+                } else {
+                    payload.subjectId = quizDetails.subjectId;
+                }
             } else {
-                payload.subjectId = quizDetails.subjectId;
+                if (quizDetails.departmentId) {
+                    const selectedDept = academicCatalog.departments?.find(d => String(d.id) === String(quizDetails.departmentId));
+                    if (selectedDept) {
+                        payload.department = selectedDept.name;
+                    }
+                }
+                if (quizDetails.semesterId) {
+                    payload.semester = String(quizDetails.semesterId);
+                }
             }
 
             await createFullQuiz(payload);
@@ -286,14 +307,16 @@ export default function CreateQuiz() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <input name="title" placeholder="Quiz Title" value={quizDetails.title} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm" />
                     {useNewAcademicModel ? (
-                        <select name="courseOfferingId" value={quizDetails.courseOfferingId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white col-span-1 md:col-span-2 text-sm">
-                            <option value="">Select Course Offering</option>
-                            {academicCatalog.courseOfferings?.map((co) => (
-                                <option key={co.id} value={co.id}>
-                                    {co.subject_code ? `${co.subject_code} — ` : ""}{co.subject_name} ({co.term_type} {co.term_number}, {co.program_name})
-                                </option>
-                            ))}
-                        </select>
+                        quizDetails.quizCategory !== "practice" && (
+                            <select name="courseOfferingId" value={quizDetails.courseOfferingId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white col-span-1 md:col-span-2 text-sm">
+                                <option value="">Select Course Offering</option>
+                                {academicCatalog.courseOfferings?.map((co) => (
+                                    <option key={co.id} value={co.id}>
+                                        {co.subject_code ? `${co.subject_code} — ` : ""}{co.subject_name} ({co.term_type} {co.term_number}, {co.program_name})
+                                    </option>
+                                ))}
+                            </select>
+                        )
                     ) : (
                         <>
                             <select name="departmentId" value={quizDetails.departmentId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm">
@@ -312,14 +335,16 @@ export default function CreateQuiz() {
                                 ))}
                             </select>
 
-                            <select name="subjectId" value={quizDetails.subjectId} onChange={handleQuizChange} disabled={!quizDetails.semesterId} className="input bg-[#252526] border-gray-700 text-white text-sm disabled:opacity-50">
-                                <option value="">Select Subject</option>
-                                {availableSubjects.map((subject) => (
-                                    <option key={subject.id} value={subject.id}>
-                                        {subject.code ? `${subject.code} — ` : ""}{subject.name}
-                                    </option>
-                                ))}
-                            </select>
+                            {quizDetails.quizCategory !== "practice" && (
+                                <select name="subjectId" value={quizDetails.subjectId} onChange={handleQuizChange} disabled={!quizDetails.semesterId} className="input bg-[#252526] border-gray-700 text-white text-sm disabled:opacity-50">
+                                    <option value="">Select Subject</option>
+                                    {availableSubjects.map((subject) => (
+                                        <option key={subject.id} value={subject.id}>
+                                            {subject.code ? `${subject.code} — ` : ""}{subject.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
                         </>
                     )}
 
@@ -358,7 +383,7 @@ export default function CreateQuiz() {
 
                             <button
                                 type="button"
-                                onClick={() => setQuizDetails(prev => ({ ...prev, quizCategory: "practice" }))}
+                                onClick={() => setQuizDetails(prev => ({ ...prev, quizCategory: "practice", subjectId: "", courseOfferingId: "" }))}
                                 className={`flex items-center justify-between p-3 rounded-lg border text-xs font-bold transition-all text-left ${
                                     quizDetails.quizCategory === "practice"
                                         ? "bg-purple-600/20 border-purple-500 text-white shadow-md shadow-purple-500/10"

@@ -190,25 +190,70 @@ async function ensureStudentDDL() {
     }
 }
 
-// Get All Practice Quizzes Added by Teachers
+// Get All Practice Quizzes Added by Teachers (with attempt history, filtered by student's dept/sem)
 router.get("/quizzes/practice", auth, async (req, res) => {
     try {
         await ensureStudentDDL();
 
+        // Resolve student profile UUID
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("id, department")
+            .eq("email", req.user.email)
+            .single();
+        const userId = profile?.id || req.user.id;
+
         let quizzes = [];
         try {
-            const resData = await pool.query(`
-                SELECT q.*, p.full_name AS creator_name, p.email AS creator_email
-                FROM quizzes q
-                LEFT JOIN profiles p ON p.id = q.created_by
-                WHERE q.is_practice = true OR q.quiz_type = 'practice'
-                ORDER BY q.created_at DESC
-            `);
-            quizzes = resData.rows.map(q => ({
-                ...q,
-                creator: { full_name: q.creator_name, email: q.creator_email }
-            }));
+            if (FEATURES.NEW_ACADEMIC_MODEL) {
+                let studentDeptId = null;
+                let studentTermId = null;
+                const memberRes = await pool.query(`
+                    SELECT department_id, academic_term_id
+                    FROM institution_memberships
+                    WHERE user_id = $1 AND is_active = true
+                    LIMIT 1
+                `, [userId]);
+                if (memberRes.rows.length > 0) {
+                    studentDeptId = memberRes.rows[0].department_id;
+                    studentTermId = memberRes.rows[0].academic_term_id;
+                }
+
+                if (studentDeptId && studentTermId) {
+                    const resData = await pool.query(`
+                        SELECT q.*, p.full_name AS creator_name, p.email AS creator_email
+                        FROM quizzes q
+                        LEFT JOIN profiles p ON p.id = q.created_by
+                        JOIN course_offerings co ON co.id = q.course_offering_id
+                        JOIN academic_terms at ON at.id = co.academic_term_id
+                        JOIN programs pr ON pr.id = at.program_id
+                        WHERE (q.is_practice = true OR q.quiz_type = 'practice')
+                          AND pr.department_id = $1
+                          AND co.academic_term_id = $2
+                        ORDER BY q.created_at DESC
+                    `, [studentDeptId, studentTermId]);
+                    quizzes = resData.rows.map(q => ({
+                        ...q,
+                        creator: { full_name: q.creator_name, email: q.creator_email }
+                    }));
+                }
+            } else {
+                const studentDept = profile?.department || '';
+                const resData = await pool.query(`
+                    SELECT q.*, p.full_name AS creator_name, p.email AS creator_email
+                    FROM quizzes q
+                    LEFT JOIN profiles p ON p.id = q.created_by
+                    WHERE (q.is_practice = true OR q.quiz_type = 'practice')
+                      AND q.department = $1
+                    ORDER BY q.created_at DESC
+                `, [studentDept]);
+                quizzes = resData.rows.map(q => ({
+                    ...q,
+                    creator: { full_name: q.creator_name, email: q.creator_email }
+                }));
+            }
         } catch (dbErr) {
+            console.warn("Practice quizzes pool select failed, trying supabase:", dbErr.message);
             const { data } = await supabase
                 .from("quizzes")
                 .select("*, creator:profiles!created_by(full_name, email)")
@@ -216,35 +261,117 @@ router.get("/quizzes/practice", auth, async (req, res) => {
             quizzes = (data || []).filter(q => q.is_practice || q.quiz_type === "practice");
         }
 
-        res.json(quizzes);
+        // Fetch all practice attempts by this student in one query
+        const quizIds = quizzes.map(q => q.id);
+        let attemptsByQuiz = {};
+        if (quizIds.length > 0 && userId) {
+            try {
+                const attemptsRes = await pool.query(`
+                    SELECT id, quiz_id, score, total_marks, status, completed_at
+                    FROM quiz_attempts
+                    WHERE user_id = $1
+                      AND quiz_id = ANY($2)
+                      AND status IN ('submitted', 'evaluated')
+                    ORDER BY completed_at DESC
+                `, [userId, quizIds]);
+                for (const row of attemptsRes.rows) {
+                    if (!attemptsByQuiz[row.quiz_id]) attemptsByQuiz[row.quiz_id] = [];
+                    attemptsByQuiz[row.quiz_id].push({
+                        id: row.id,
+                        score: row.score,
+                        total_marks: row.total_marks,
+                        status: row.status,
+                        completed_at: row.completed_at
+                    });
+                }
+            } catch (attErr) {
+                console.error("Practice attempts fetch error:", attErr.message);
+            }
+        }
+
+        const enriched = quizzes.map(q => ({
+            ...q,
+            attempts: attemptsByQuiz[q.id] || []
+        }));
+
+        res.json(enriched);
     } catch (err) {
         console.error("Fetch Teacher Practice Quizzes Error:", err);
         res.status(500).json({ error: err.message });
     }
 });
 
-// Get All Active/Scheduled Real Quizzes for Students
+// Get All Active/Scheduled Real Quizzes for Students (filtered by student's dept/sem)
 router.get("/quizzes", auth, async (req, res) => {
     try {
         await ensureStudentDDL();
 
+        // Fetch correct profile UUID to check attempts (req.user.id is legacy Integer)
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("id, department")
+            .eq("email", req.user.email)
+            .single();
+
+        const userId = profile?.id || req.user.id;
+
         let quizzes = [];
         try {
-            const quizzesRes = await pool.query(`
-                SELECT 
-                    q.*,
-                    p.full_name AS creator_name,
-                    p.email AS creator_email
-                FROM quizzes q
-                LEFT JOIN profiles p ON p.id = q.created_by
-                WHERE (q.is_practice IS NOT TRUE AND COALESCE(q.quiz_type, '') != 'practice')
-                  AND (q.is_archived IS NOT TRUE)
-                ORDER BY q.created_at DESC
-            `);
-            quizzes = quizzesRes.rows.map(q => ({
-                ...q,
-                creator: { full_name: q.creator_name, email: q.creator_email }
-            }));
+            if (FEATURES.NEW_ACADEMIC_MODEL) {
+                let studentDeptId = null;
+                let studentTermId = null;
+                const memberRes = await pool.query(`
+                    SELECT department_id, academic_term_id
+                    FROM institution_memberships
+                    WHERE user_id = $1 AND is_active = true
+                    LIMIT 1
+                `, [userId]);
+                if (memberRes.rows.length > 0) {
+                    studentDeptId = memberRes.rows[0].department_id;
+                    studentTermId = memberRes.rows[0].academic_term_id;
+                }
+
+                if (studentDeptId && studentTermId) {
+                    const quizzesRes = await pool.query(`
+                        SELECT 
+                            q.*,
+                            p.full_name AS creator_name,
+                            p.email AS creator_email
+                        FROM quizzes q
+                        LEFT JOIN profiles p ON p.id = q.created_by
+                        JOIN course_offerings co ON co.id = q.course_offering_id
+                        JOIN academic_terms at ON at.id = co.academic_term_id
+                        JOIN programs pr ON pr.id = at.program_id
+                        WHERE (q.is_practice IS NOT TRUE AND COALESCE(q.quiz_type, '') != 'practice')
+                          AND (q.is_archived IS NOT TRUE)
+                          AND pr.department_id = $1
+                          AND co.academic_term_id = $2
+                        ORDER BY q.created_at DESC
+                    `, [studentDeptId, studentTermId]);
+                    quizzes = quizzesRes.rows.map(q => ({
+                        ...q,
+                        creator: { full_name: q.creator_name, email: q.creator_email }
+                    }));
+                }
+            } else {
+                const userDept = profile?.department || '';
+                const quizzesRes = await pool.query(`
+                    SELECT 
+                        q.*,
+                        p.full_name AS creator_name,
+                        p.email AS creator_email
+                    FROM quizzes q
+                    LEFT JOIN profiles p ON p.id = q.created_by
+                    WHERE (q.is_practice IS NOT TRUE AND COALESCE(q.quiz_type, '') != 'practice')
+                      AND (q.is_archived IS NOT TRUE)
+                      AND q.department = $1
+                    ORDER BY q.created_at DESC
+                `, [userDept]);
+                quizzes = quizzesRes.rows.map(q => ({
+                    ...q,
+                    creator: { full_name: q.creator_name, email: q.creator_email }
+                }));
+            }
         } catch (dbErr) {
             console.warn("[Student Quizzes Fallback] Pool query failed, trying basic select:", dbErr.message);
             const { data } = await supabase
@@ -254,17 +381,8 @@ router.get("/quizzes", auth, async (req, res) => {
             quizzes = (data || []).filter(q => !q.is_practice && q.quiz_type !== "practice");
         }
 
-        console.log(`[Student] Fetching quizzes for ${req.user.email} (ID: ${req.user.id})`);
+        console.log(`[Student] Fetching quizzes for ${req.user.email} (ID: ${userId})`);
         console.log(`[Student] Found ${quizzes?.length || 0} quizzes`);
-
-        // Fetch correct profile UUID to check attempts (req.user.id is legacy Integer)
-        const { data: profile } = await supabase
-            .from("profiles")
-            .select("id")
-            .eq("email", req.user.email)
-            .single();
-
-        const userId = profile?.id || req.user.id;
 
         // Fetch attempt status for each quiz for this user
         const { data: attempts } = await supabase
@@ -344,31 +462,52 @@ router.get("/history", auth, async (req, res) => {
         }
         console.log(`[History] Fetching history for email: ${req.user.email}, Profile ID: ${userId}`);
 
-        if (!userId) {
-            console.error("[History] Profile not found for user!");
-            return res.json([]);
+        let history = [];
+        if (FEATURES.NEW_ACADEMIC_MODEL) {
+            const resData = await pool.query(`
+                SELECT 
+                    qa.id,
+                    qa.score,
+                    qa.completed_at,
+                    qa.status,
+                    json_build_object(
+                        'id', q.id,
+                        'title', q.title,
+                        'subject', COALESCE(sub.name, 'General'),
+                        'total_marks', COALESCE(qa.total_marks, q.total_marks, 0),
+                        'scheduled_at', q.scheduled_at,
+                        'created_at', q.created_at
+                    ) AS quiz
+                FROM quiz_attempts qa
+                JOIN quizzes q ON q.id = qa.quiz_id
+                LEFT JOIN course_offerings co ON co.id = q.course_offering_id
+                LEFT JOIN subjects sub ON sub.id = co.subject_id
+                WHERE qa.user_id = $1 AND qa.status IN ('submitted', 'evaluated')
+                ORDER BY qa.completed_at DESC
+            `, [userId]);
+            history = resData.rows;
+        } else {
+            const resData = await pool.query(`
+                SELECT 
+                    qa.id,
+                    qa.score,
+                    qa.completed_at,
+                    qa.status,
+                    json_build_object(
+                        'id', q.id,
+                        'title', q.title,
+                        'subject', COALESCE(q.subject, 'General'),
+                        'total_marks', COALESCE(qa.total_marks, q.total_marks, 0),
+                        'scheduled_at', q.scheduled_at,
+                        'created_at', q.created_at
+                    ) AS quiz
+                FROM quiz_attempts qa
+                JOIN quizzes q ON q.id = qa.quiz_id
+                WHERE qa.user_id = $1 AND qa.status IN ('submitted', 'evaluated')
+                ORDER BY qa.completed_at DESC
+            `, [userId]);
+            history = resData.rows;
         }
-
-        const { data: history, error } = await supabase
-            .from("quiz_attempts")
-            .select(`
-                id,
-                score,
-                completed_at,
-                status,
-                quiz:quizzes (
-                    id,
-                    title,
-                    subject,
-                    total_marks,
-                    scheduled_at,
-                    created_at
-                )
-            `)
-            .eq("user_id", userId)
-            .order("completed_at", { ascending: false });
-
-        if (error) throw error;
 
         res.json(history);
     } catch (err) {
@@ -381,36 +520,109 @@ router.get("/history", auth, async (req, res) => {
     }
 });
 
-// Get Quiz Leaderboard
+// Get Quiz Leaderboard (filtered by student's dept/sem, with pagination)
 router.get("/leaderboard", auth, async (req, res) => {
     try {
         const { quizId } = req.query;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 10));
+        const offset = (page - 1) * limit;
 
-        let query = supabase
-            .from("quiz_attempts")
-            .select(`
-                score,
-                user:profiles(email),
-                quiz:quizzes(title)
-            `)
-            .order("score", { ascending: false });
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("id, department")
+            .eq("email", req.user.email)
+            .single();
 
-        if (quizId) {
-            query = query.eq("quiz_id", quizId);
+        const userId = profile?.id || req.user.id;
+
+        let leaderboard = [];
+        let totalCount = 0;
+
+        if (FEATURES.NEW_ACADEMIC_MODEL) {
+            let studentDeptId = null;
+            let studentTermId = null;
+            const memberRes = await pool.query(`
+                SELECT department_id, academic_term_id
+                FROM institution_memberships
+                WHERE user_id = $1 AND is_active = true
+                LIMIT 1
+            `, [userId]);
+            if (memberRes.rows.length > 0) {
+                studentDeptId = memberRes.rows[0].department_id;
+                studentTermId = memberRes.rows[0].academic_term_id;
+            }
+
+            if (studentDeptId && studentTermId) {
+                let sql = `
+                    SELECT 
+                        qa.score,
+                        p.email,
+                        p.full_name,
+                        q.title AS quiz_title,
+                        COALESCE(qa.total_marks, q.total_marks, 0) AS total_marks,
+                        COUNT(*) OVER() AS total_count
+                    FROM quiz_attempts qa
+                    JOIN profiles p ON p.id = qa.user_id
+                    JOIN quizzes q ON q.id = qa.quiz_id
+                    JOIN course_offerings co ON co.id = q.course_offering_id
+                    JOIN academic_terms at ON at.id = co.academic_term_id
+                    JOIN programs pr ON pr.id = at.program_id
+                    WHERE pr.department_id = $1 AND co.academic_term_id = $2
+                      AND qa.status IN ('submitted', 'evaluated')
+                `;
+                const params = [studentDeptId, studentTermId, limit, offset];
+                if (quizId) {
+                    sql += ` AND qa.quiz_id = $5`;
+                    params.push(quizId);
+                }
+                sql += ` ORDER BY qa.score DESC LIMIT $3 OFFSET $4`;
+
+                const resData = await pool.query(sql, params);
+                leaderboard = resData.rows;
+                totalCount = leaderboard.length > 0 ? parseInt(leaderboard[0].total_count) : 0;
+            }
+        } else {
+            const userDept = profile?.department || '';
+            let sql = `
+                SELECT 
+                    qa.score,
+                    p.email,
+                    p.full_name,
+                    q.title AS quiz_title,
+                    COALESCE(qa.total_marks, q.total_marks, 0) AS total_marks,
+                    COUNT(*) OVER() AS total_count
+                FROM quiz_attempts qa
+                JOIN profiles p ON p.id = qa.user_id
+                JOIN quizzes q ON q.id = qa.quiz_id
+                WHERE q.department = $1
+                  AND qa.status IN ('submitted', 'evaluated')
+            `;
+            const params = [userDept, limit, offset];
+            if (quizId) {
+                sql += ` AND qa.quiz_id = $4`;
+                params.push(quizId);
+            }
+            sql += ` ORDER BY qa.score DESC LIMIT $2 OFFSET $3`;
+
+            const resData = await pool.query(sql, params);
+            leaderboard = resData.rows;
+            totalCount = leaderboard.length > 0 ? parseInt(leaderboard[0].total_count) : 0;
         }
 
-        const { data, error } = await query;
-        if (error) throw error;
-
-        // Transform for frontend
-        const leaderboard = data.map(row => ({
-            username: row.user?.email?.split('@')[0] || "Unknown",
+        const leaderboardTransformed = leaderboard.map(row => ({
+            username: row.full_name || row.email?.split('@')[0] || "Unknown",
             score: row.score,
-            quizTitle: row.quiz?.title,
-            // runtime/memory not applicable for general quiz, but keeping structure if needed
+            total_marks: row.total_marks,
+            quizTitle: row.quiz_title
         }));
 
-        res.json(leaderboard);
+        res.json({
+            data: leaderboardTransformed,
+            totalCount,
+            page,
+            limit
+        });
     } catch (err) {
         console.error("Leaderboard Error:", err);
         res.status(500).json({ error: err.message });
@@ -622,18 +834,27 @@ router.post("/quiz/:id/attempt", auth, async (req, res) => {
 
         await ensureAttemptShuffleColumns();
 
-        // 1. Start Transaction (Simulated)
-        // Block duplicate final submissions
-        const { data: existingFinal } = await supabase
-            .from("quiz_attempts")
-            .select("id, status")
-            .eq("user_id", userId)
-            .eq("quiz_id", id)
-            .in("status", ["submitted", "evaluated"])
-            .order("completed_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-        if (existingFinal) return res.status(400).json({ error: "Attempt already exists" });
+        // Check if this is a practice quiz (allow re-attempts)
+        const { data: quizTypeCheck } = await supabase
+            .from("quizzes")
+            .select("is_practice, quiz_type")
+            .eq("id", id)
+            .single();
+        const isPracticeQuiz = quizTypeCheck?.is_practice === true || quizTypeCheck?.quiz_type === 'practice';
+
+        // 1. Block duplicate final submissions (skip for practice quizzes)
+        if (!isPracticeQuiz) {
+            const { data: existingFinal } = await supabase
+                .from("quiz_attempts")
+                .select("id, status")
+                .eq("user_id", userId)
+                .eq("quiz_id", id)
+                .in("status", ["submitted", "evaluated"])
+                .order("completed_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (existingFinal) return res.status(400).json({ error: "Attempt already exists" });
+        }
 
         // Reuse existing in-progress attempt if present (contains question_order).
         const { data: inProgressAttempt } = await supabase
@@ -1107,7 +1328,7 @@ router.get("/history/:attemptId", auth, async (req, res) => {
     }
 });
 
-// Practice quiz payload (untimed, non-persistent)
+// Practice quiz payload (time-limited, persistent via real attempt API)
 router.get("/practice/quiz/:id", auth, async (req, res) => {
     try {
         const { id } = req.params;
@@ -1116,7 +1337,9 @@ router.get("/practice/quiz/:id", auth, async (req, res) => {
 
         const quizResult = await pool.query(
             `
-                SELECT id, title, COALESCE(subject, 'General') AS subject, COALESCE(total_marks, 0) AS total_marks
+                SELECT id, title, COALESCE(subject, 'General') AS subject,
+                       COALESCE(total_marks, 0) AS total_marks,
+                       COALESCE(duration, 60) AS duration
                 FROM quizzes
                 WHERE id = $1
                 LIMIT 1;
@@ -1163,8 +1386,8 @@ router.get("/practice/quiz/:id", auth, async (req, res) => {
 
         return res.json({
             mode: "practice",
-            timed: false,
-            persistent: false,
+            timed: true,
+            persistent: true,
             quiz: quizResult.rows[0],
             questions: questionsResult.rows
         });

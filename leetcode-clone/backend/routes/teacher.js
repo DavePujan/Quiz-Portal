@@ -867,7 +867,7 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
         // Fetch valid UUID from Supabase profiles
         const { data: profile, error } = await supabase
             .from("profiles")
-            .select("id")
+            .select("id, department")
             .ilike("email", req.user.email) // Changed to ilike for case-insensitivity
             .single();
 
@@ -878,7 +878,7 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
         // clients can continue submitting subject/department/semester text.
         let resolvedSubjectId = subjectId || null;
         let resolvedSubject = subject || null;
-        let resolvedDepartment = department || null;
+        let resolvedDepartment = department || profile?.department || null;
         let resolvedSemester = semester || null;
         let resolvedInstitutionId = null;
         let resolvedCourseOfferingId = null;
@@ -941,25 +941,24 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
         };
 
         if (FEATURES.NEW_ACADEMIC_MODEL) {
-            if (!courseOfferingId) throw new Error("courseOfferingId is required in new academic model");
+            if (!isPracticeFlag && !courseOfferingId) throw new Error("courseOfferingId is required in new academic model");
             
             // Runtime Tenant & Ownership Verification
-            const { data: co } = await supabase
-                .from("course_offerings")
-                .select("institution_id, teacher_id")
-                .eq("id", courseOfferingId)
-                .single();
-            if (!co) throw new Error("Invalid courseOfferingId");
-            if (co.teacher_id !== userId) throw new Error("Unauthorized: You do not own this course offering");
+            if (courseOfferingId) {
+                const { data: co } = await supabase
+                    .from("course_offerings")
+                    .select("institution_id, teacher_id")
+                    .eq("id", courseOfferingId)
+                    .single();
+                if (!co) throw new Error("Invalid courseOfferingId");
+                if (co.teacher_id !== userId) throw new Error("Unauthorized: You do not own this course offering");
 
-            // Optional: You could also verify if the teacher is still an active member of co.institution_id
-            
-            insertPayload = {
-                ...insertPayload,
-                institution_id: co.institution_id,
-                course_offering_id: courseOfferingId
-                // Strictly omitted: subject, subject_id, department, semester, created_by
-            };
+                insertPayload = {
+                    ...insertPayload,
+                    institution_id: co.institution_id,
+                    course_offering_id: courseOfferingId
+                };
+            }
         } else {
             insertPayload = {
                 ...insertPayload,

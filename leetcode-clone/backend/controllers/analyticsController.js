@@ -784,12 +784,25 @@ const exportQuizAnalyticsCsv = async (req, res) => {
     const scope = getTeacherDepartmentScope(req);
     await assertTeacherCanAccessQuiz(quizId, scope.userId);
 
-    const quizMetaQuery = `
-      SELECT id, title, COALESCE(subject, 'General') AS subject, COALESCE(department, '-') AS department, COALESCE(semester, '-') AS semester
-      FROM quizzes
-      WHERE id = $1
-      LIMIT 1;
-    `;
+    const useNewAcademicModel = process.env.USE_NEW_ACADEMIC_MODEL === 'true';
+    const quizMetaQuery = useNewAcademicModel
+      ? `
+        SELECT 
+          id, 
+          title, 
+          COALESCE((SELECT s.name FROM course_offerings co JOIN subjects s ON s.id = co.subject_id WHERE co.id = quizzes.course_offering_id), 'General') AS subject, 
+          COALESCE((SELECT d.name FROM course_offerings co JOIN academic_terms at ON at.id = co.academic_term_id JOIN programs p ON p.id = at.program_id JOIN departments d ON d.id = p.department_id WHERE co.id = quizzes.course_offering_id), '-') AS department, 
+          COALESCE((SELECT at.term_number::text FROM course_offerings co JOIN academic_terms at ON at.id = co.academic_term_id WHERE co.id = quizzes.course_offering_id), '-') AS semester
+        FROM quizzes
+        WHERE id = $1
+        LIMIT 1;
+      `
+      : `
+        SELECT id, title, COALESCE(subject, 'General') AS subject, COALESCE(department, '-') AS department, COALESCE(semester, '-') AS semester
+        FROM quizzes
+        WHERE id = $1
+        LIMIT 1;
+      `;
     const quizMetaResult = await pool.query(quizMetaQuery, [quizId]);
     if (quizMetaResult.rows.length === 0) {
       return res.status(404).json({ error: "Quiz not found" });
@@ -956,6 +969,11 @@ const getStudentComprehensiveAnalytics = async (req, res) => {
       ? "qa.submitted_at"
       : "COALESCE(qa.completed_at, qa.started_at)";
 
+    const useNewAcademicModel = process.env.USE_NEW_ACADEMIC_MODEL === 'true';
+    const subjectSelect = useNewAcademicModel 
+      ? `COALESCE((SELECT s.name FROM course_offerings co JOIN subjects s ON s.id = co.subject_id WHERE co.id = q.course_offering_id), 'General')`
+      : `COALESCE(q.subject, 'General')`;
+
     // 1. Fetch all quiz attempts for this student
     const attemptsQuery = `
           SELECT 
@@ -965,7 +983,7 @@ const getStudentComprehensiveAnalytics = async (req, res) => {
               COALESCE(qa.total_marks, q.total_marks, 0) AS total_marks,
               ${submittedAtExpr} AS submitted_at,
               q.title as quiz_title,
-              q.subject,
+              ${subjectSelect} AS subject,
               ROUND(
                 (
                   CASE
@@ -1051,7 +1069,7 @@ const getStudentComprehensiveAnalytics = async (req, res) => {
     // 4. Subject-wise aggregation
     const subjectPerformanceQuery = `
       SELECT
-        COALESCE(q.subject, 'General') AS subject,
+        ${subjectSelect} AS subject,
         ROUND(
           AVG(
             CASE
@@ -1067,7 +1085,7 @@ const getStudentComprehensiveAnalytics = async (req, res) => {
       JOIN quizzes q ON q.id = qa.quiz_id
       WHERE qa.user_id = $1
         AND qa.status IN ('submitted', 'evaluated')
-      GROUP BY q.subject
+      GROUP BY ${subjectSelect}
       ORDER BY avg_score DESC;
     `;
     const subjectPerformanceResult = await pool.query(subjectPerformanceQuery, [resolvedStudentId]);
@@ -1077,7 +1095,7 @@ const getStudentComprehensiveAnalytics = async (req, res) => {
       SELECT
         q.id,
         q.title,
-        COALESCE(q.subject, 'General') AS subject,
+        ${subjectSelect} AS subject,
         qa.score,
         COALESCE(qa.total_marks, q.total_marks, 0) AS total_marks,
         ROUND(
@@ -1154,15 +1172,20 @@ const getStudentRecommendations = async (req, res) => {
   try {
     const resolvedUserId = await resolveStudentProfileId(req, userId);
 
+    const useNewAcademicModel = process.env.USE_NEW_ACADEMIC_MODEL === 'true';
+    const subjectSelect = useNewAcademicModel
+      ? `COALESCE((SELECT s.name FROM course_offerings co JOIN subjects s ON s.id = co.subject_id WHERE co.id = q.course_offering_id), 'General')`
+      : `COALESCE(q.subject, 'General')`;
+
     const subjectPerformanceQuery = `
       SELECT
-        COALESCE(q.subject, 'General') AS subject,
+        ${subjectSelect} AS subject,
         ROUND(AVG(CASE WHEN qa.total_marks > 0 THEN qa.score * 100.0 / qa.total_marks ELSE 0 END)::numeric, 2) AS avg_score
       FROM quiz_attempts qa
       JOIN quizzes q ON q.id = qa.quiz_id
       WHERE qa.user_id = $1
         AND qa.status IN ('submitted', 'evaluated')
-      GROUP BY q.subject;
+      GROUP BY ${subjectSelect};
     `;
     const subjectRes = await pool.query(subjectPerformanceQuery, [resolvedUserId]);
 
@@ -1179,9 +1202,9 @@ const getStudentRecommendations = async (req, res) => {
     }
 
     const recommendationsQuery = `
-      SELECT id, title, COALESCE(subject, 'General') AS subject
+      SELECT id, title, ${subjectSelect} AS subject
       FROM quizzes q
-      WHERE COALESCE(q.subject, 'General') = ANY($1)
+      WHERE ${subjectSelect} = ANY($1)
         AND q.status IN ('active', 'completed')
         AND (
           NOT EXISTS (
@@ -1215,9 +1238,9 @@ const getStudentRecommendations = async (req, res) => {
     let recommendations = quizRes.rows;
     if (recommendations.length === 0) {
       const fallbackQuery = `
-        SELECT id, title, COALESCE(subject, 'General') AS subject
+        SELECT id, title, ${subjectSelect} AS subject
         FROM quizzes q
-        WHERE COALESCE(q.subject, 'General') = ANY($1)
+        WHERE ${subjectSelect} = ANY($1)
           AND COALESCE(q.is_active, true) = true
           AND (
             NOT EXISTS (
@@ -1343,6 +1366,11 @@ const getStudentRecommendationsV2 = async (req, res) => {
 
     const recommendations = [];
 
+    const useNewAcademicModel = process.env.USE_NEW_ACADEMIC_MODEL === 'true';
+    const subjectSelect = useNewAcademicModel 
+      ? `COALESCE((SELECT s.name FROM course_offerings co JOIN subjects s ON s.id = co.subject_id WHERE co.id = qu.course_offering_id), 'General')`
+      : `COALESCE(qu.subject, 'General')`;
+
     for (const weak of weakTopics) {
       const targetDifficulty = difficultyMap[weak.topicId] || "easy";
 
@@ -1352,7 +1380,7 @@ const getStudentRecommendationsV2 = async (req, res) => {
           SELECT DISTINCT
             qu.id,
             qu.title,
-            COALESCE(qu.subject, 'General') AS subject,
+            ${subjectSelect} AS subject,
             ${hasDifficultyColumn ? "COALESCE(qu.difficulty, 'medium')" : "$2::text"} AS difficulty
           FROM quizzes qu
           JOIN quiz_questions_map qqm ON qqm.quiz_id = qu.id
@@ -1397,7 +1425,7 @@ const getStudentRecommendationsV2 = async (req, res) => {
             SELECT DISTINCT
               qu.id,
               qu.title,
-              COALESCE(qu.subject, 'General') AS subject,
+              ${subjectSelect} AS subject,
               COALESCE(qu.difficulty, 'medium') AS difficulty
             FROM quizzes qu
             JOIN quiz_questions_map qqm ON qqm.quiz_id = qu.id
@@ -1443,7 +1471,7 @@ const getStudentRecommendationsV2 = async (req, res) => {
             SELECT DISTINCT
               qu.id,
               qu.title,
-              COALESCE(qu.subject, 'General') AS subject,
+              ${subjectSelect} AS subject,
               ${hasDifficultyColumn ? "COALESCE(qu.difficulty, 'medium')" : "$2::text"} AS difficulty
             FROM quizzes qu
             JOIN quiz_questions_map qqm ON qqm.quiz_id = qu.id
