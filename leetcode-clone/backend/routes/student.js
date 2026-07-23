@@ -876,22 +876,36 @@ router.post("/quiz/:id/attempt", auth, async (req, res) => {
 
         let attempt = inProgressAttempt;
         if (!attempt) {
-            const { data: createdAttempt, error: attemptError } = await supabase
+            // Check if any attempt already exists for this user & quiz (e.g. previous practice attempt)
+            const { data: existingAttempt } = await supabase
                 .from("quiz_attempts")
-                .insert({
-                    user_id: userId,
-                    quiz_id: id,
-                    status: "in_progress",
-                    total_marks: totalMarks,
-                    started_at: new Date(),
-                    completed_at: null,
-                    question_order: []
-                })
-                .select()
-                .single();
+                .select("id, question_order")
+                .eq("user_id", userId)
+                .eq("quiz_id", id)
+                .order("completed_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
 
-            if (attemptError) throw attemptError;
-            attempt = createdAttempt;
+            if (existingAttempt) {
+                attempt = existingAttempt;
+            } else {
+                const { data: createdAttempt, error: attemptError } = await supabase
+                    .from("quiz_attempts")
+                    .insert({
+                        user_id: userId,
+                        quiz_id: id,
+                        status: "in_progress",
+                        total_marks: totalMarks,
+                        started_at: new Date(),
+                        completed_at: null,
+                        question_order: []
+                    })
+                    .select()
+                    .single();
+
+                if (attemptError) throw attemptError;
+                attempt = createdAttempt;
+            }
         }
 
         // 3. Process Answers & Calculate Score (Basic Auto-Eval for MCQ)
