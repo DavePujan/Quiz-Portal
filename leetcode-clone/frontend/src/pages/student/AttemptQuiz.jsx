@@ -84,25 +84,59 @@ const AttemptQuiz = () => {
         }
     };
 
+    const isPracticeMode = window.location.pathname.includes("/practice/");
+
+    // Auto-start secure mode bypass for practice mode
+    useEffect(() => {
+        if (isPracticeMode && !secureModeStarted) {
+            setSecureModeStarted(true);
+        }
+    }, [isPracticeMode, secureModeStarted]);
+
     // Fetch Quiz
     useEffect(() => {
         const fetchQuiz = async () => {
             try {
-                const response = await api.get(`/api/student/quiz/${id}`);
+                const endpoint = isPracticeMode 
+                    ? `/api/student/practice/quiz/${id}` 
+                    : `/api/student/quiz/${id}`;
+                const response = await api.get(endpoint);
                 const data = response.data;
-                // if (response.ok) check removal - api throws on error
+                const rawQuiz = data.quiz || data;
 
-                setQuiz(data);
+                const normalizedQuestions = (data.questions || rawQuiz.questions || []).map(q => ({
+                    ...q,
+                    mcq_options: q.options || q.mcq_options || []
+                }));
 
-                // Calculate Time Left based on Scheduled Time + Duration
-                // If scheduled_at is null, fallback to created_at (not ideal but safe)
-                const startTime = data.scheduled_at ? new Date(data.scheduled_at).getTime() : new Date(data.created_at).getTime();
-                const durationMs = (data.duration || 60) * 60 * 1000;
-                const endTime = startTime + durationMs;
-                const now = Date.now();
-                const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
+                const normalizedQuiz = {
+                    ...rawQuiz,
+                    questions: normalizedQuestions
+                };
 
-                setTimeLeft(remaining);
+                setQuiz(normalizedQuiz);
+
+                if (isPracticeMode) {
+                    const timerKey = `practice-timer-${id}`;
+                    const durationSeconds = (rawQuiz.duration || 60) * 60;
+                    let storedStartTime = localStorage.getItem(timerKey);
+                    
+                    if (!storedStartTime) {
+                        storedStartTime = Date.now().toString();
+                        localStorage.setItem(timerKey, storedStartTime);
+                    }
+
+                    const elapsed = Math.floor((Date.now() - Number(storedStartTime)) / 1000);
+                    const remaining = Math.max(0, durationSeconds - elapsed);
+                    setTimeLeft(remaining);
+                } else {
+                    const startTime = rawQuiz.scheduled_at ? new Date(rawQuiz.scheduled_at).getTime() : new Date(rawQuiz.created_at).getTime();
+                    const durationMs = (rawQuiz.duration || 60) * 60 * 1000;
+                    const endTime = startTime + durationMs;
+                    const now = Date.now();
+                    const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
+                    setTimeLeft(remaining);
+                }
 
             } catch (err) {
                 setError(err.response?.data?.error || "Error fetching quiz");
@@ -111,29 +145,44 @@ const AttemptQuiz = () => {
             }
         };
         if (token && id) fetchQuiz();
-    }, [token, id]);
+    }, [token, id, isPracticeMode]);
 
-    // Timer Logic - Sync with Server Time
+    // Timer Logic - Sync with Server Time or Practice Persistent Timer
     useEffect(() => {
         if (!quiz) return;
 
         const intervalId = setInterval(() => {
-            const startTime = quiz.scheduled_at ? new Date(quiz.scheduled_at).getTime() : new Date(quiz.created_at).getTime();
-            const durationMs = (quiz.duration || 60) * 60 * 1000;
-            const endTime = startTime + durationMs;
-            const now = Date.now();
-            const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
+            if (isPracticeMode) {
+                const timerKey = `practice-timer-${id}`;
+                const durationSeconds = (quiz.duration || 60) * 60;
+                const storedStartTime = localStorage.getItem(timerKey) || Date.now().toString();
+                const elapsed = Math.floor((Date.now() - Number(storedStartTime)) / 1000);
+                const remaining = Math.max(0, durationSeconds - elapsed);
 
-            setTimeLeft(remaining);
+                setTimeLeft(remaining);
 
-            if (remaining <= 0 && !submitting) {
-                clearInterval(intervalId);
-                handleSubmit(true); // Auto submit
+                if (remaining <= 0 && !submitting) {
+                    clearInterval(intervalId);
+                    handleSubmit(true);
+                }
+            } else {
+                const startTime = quiz.scheduled_at ? new Date(quiz.scheduled_at).getTime() : new Date(quiz.created_at).getTime();
+                const durationMs = (quiz.duration || 60) * 60 * 1000;
+                const endTime = startTime + durationMs;
+                const now = Date.now();
+                const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
+
+                setTimeLeft(remaining);
+
+                if (remaining <= 0 && !submitting) {
+                    clearInterval(intervalId);
+                    handleSubmit(true); // Auto submit
+                }
             }
         }, 1000);
 
         return () => clearInterval(intervalId);
-    }, [quiz, submitting]);
+    }, [quiz, submitting, isPracticeMode, id]);
 
     // Secure exam behavior tracking (real quiz only)
     useEffect(() => {
@@ -320,8 +369,12 @@ const AttemptQuiz = () => {
             const data = response.data;
             setAttemptCompleted(true);
 
-            if (!auto) alert(`Quiz Submitted! Score: ${data.attemptScore || 'Pending Evaluation'}`);
-            navigate("/");
+            if (isPracticeMode) {
+                localStorage.removeItem(`practice-timer-${id}`);
+            }
+
+            if (!auto) alert(`Quiz Submitted! Score: ${data.attemptScore ?? data.score ?? 'Evaluated'}`);
+            navigate(isPracticeMode ? "/student/practice" : "/");
 
         } catch (err) {
             console.error(err);
@@ -377,7 +430,7 @@ const AttemptQuiz = () => {
     const now = new Date();
     const startTime = quiz.scheduled_at ? new Date(quiz.scheduled_at) : new Date(quiz.created_at);
     // Add small buffer (e.g. 2s) to prevent immediate redirect if clocks are slightly off
-    if (now < startTime) return <div className="text-white text-center mt-20">Quiz not started yet.</div>;
+    if (!isPracticeMode && now < startTime) return <div className="text-white text-center mt-20">Quiz not started yet.</div>;
 
     const currentQ = quiz.questions[currentQuestionIndex];
     const starterCode = currentQ?.type === 'code'
