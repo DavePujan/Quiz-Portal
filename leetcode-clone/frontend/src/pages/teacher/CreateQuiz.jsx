@@ -305,10 +305,16 @@ export default function CreateQuiz() {
             <div className="bg-[#1e1e1e] p-4 sm:p-6 rounded-lg mb-8 shadow-lg border border-gray-800">
                 <h2 className="text-lg sm:text-xl font-bold mb-4 text-pink-400">1. Quiz Details</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input name="title" placeholder="Quiz Title" value={quizDetails.title} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm" />
+                    <input 
+                        name="title" 
+                        placeholder="Quiz Title" 
+                        value={quizDetails.title} 
+                        onChange={handleQuizChange} 
+                        className={`input bg-[#252526] border-gray-700 text-white text-sm ${useNewAcademicModel && quizDetails.quizCategory === "practice" ? "col-span-1 md:col-span-2" : "col-span-1"}`} 
+                    />
                     {useNewAcademicModel ? (
                         quizDetails.quizCategory !== "practice" && (
-                            <select name="courseOfferingId" value={quizDetails.courseOfferingId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white col-span-1 md:col-span-2 text-sm">
+                            <select name="courseOfferingId" value={quizDetails.courseOfferingId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm col-span-1">
                                 <option value="">Select Course Offering</option>
                                 {academicCatalog.courseOfferings?.map((co) => (
                                     <option key={co.id} value={co.id}>
@@ -319,7 +325,7 @@ export default function CreateQuiz() {
                         )
                     ) : (
                         <>
-                            <select name="departmentId" value={quizDetails.departmentId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm">
+                            <select name="departmentId" value={quizDetails.departmentId} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm col-span-1">
                                 <option value="">Select Department</option>
                                 {academicCatalog.departments?.map((department) => (
                                     <option key={department.id} value={department.id}>
@@ -328,7 +334,13 @@ export default function CreateQuiz() {
                                 ))}
                             </select>
 
-                            <select name="semesterId" value={quizDetails.semesterId} onChange={handleQuizChange} disabled={!quizDetails.departmentId} className="input bg-[#252526] border-gray-700 text-white text-sm disabled:opacity-50">
+                            <select 
+                                name="semesterId" 
+                                value={quizDetails.semesterId} 
+                                onChange={handleQuizChange} 
+                                disabled={!quizDetails.departmentId} 
+                                className={`input bg-[#252526] border-gray-700 text-white text-sm disabled:opacity-50 ${quizDetails.quizCategory === "practice" ? "col-span-1 md:col-span-2" : "col-span-1"}`}
+                            >
                                 <option value="">Select Semester</option>
                                 {availableSemesters.map((semester) => (
                                     <option key={semester.id} value={semester.semester_no}>Semester {semester.semester_no}</option>
@@ -336,7 +348,7 @@ export default function CreateQuiz() {
                             </select>
 
                             {quizDetails.quizCategory !== "practice" && (
-                                <select name="subjectId" value={quizDetails.subjectId} onChange={handleQuizChange} disabled={!quizDetails.semesterId} className="input bg-[#252526] border-gray-700 text-white text-sm disabled:opacity-50">
+                                <select name="subjectId" value={quizDetails.subjectId} onChange={handleQuizChange} disabled={!quizDetails.semesterId} className="input bg-[#252526] border-gray-700 text-white text-sm disabled:opacity-50 col-span-1">
                                     <option value="">Select Subject</option>
                                     {availableSubjects.map((subject) => (
                                         <option key={subject.id} value={subject.id}>
@@ -348,8 +360,8 @@ export default function CreateQuiz() {
                         </>
                     )}
 
-                    <input name="duration" placeholder="Duration (mins)" type="number" value={quizDetails.duration} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm" />
-                    <input name="totalMarks" type="number" placeholder="Total Marks" value={quizDetails.totalMarks} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm" />
+                    <input name="duration" placeholder="Duration (mins)" type="number" value={quizDetails.duration} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm col-span-1" />
+                    <input name="totalMarks" type="number" placeholder="Total Marks" value={quizDetails.totalMarks} onChange={handleQuizChange} className="input bg-[#252526] border-gray-700 text-white text-sm col-span-1" />
 
                     {/* Target Quiz Type / Portal Selector */}
                     <div className="flex flex-col col-span-1 md:col-span-2 bg-black/40 p-3.5 rounded-lg border border-gray-800 space-y-2">
