@@ -238,15 +238,13 @@ router.get("/quizzes/practice", auth, async (req, res) => {
                     }));
                 }
             } else {
-                const studentDept = profile?.department || '';
                 const resData = await pool.query(`
                     SELECT q.*, p.full_name AS creator_name, p.email AS creator_email
                     FROM quizzes q
                     LEFT JOIN profiles p ON p.id = q.created_by
                     WHERE (q.is_practice = true OR q.quiz_type = 'practice')
-                      AND q.department = $1
                     ORDER BY q.created_at DESC
-                `, [studentDept]);
+                `);
                 quizzes = resData.rows.map(q => ({
                     ...q,
                     creator: { full_name: q.creator_name, email: q.creator_email }
@@ -354,7 +352,6 @@ router.get("/quizzes", auth, async (req, res) => {
                     }));
                 }
             } else {
-                const userDept = profile?.department || '';
                 const quizzesRes = await pool.query(`
                     SELECT 
                         q.*,
@@ -364,9 +361,8 @@ router.get("/quizzes", auth, async (req, res) => {
                     LEFT JOIN profiles p ON p.id = q.created_by
                     WHERE (q.is_practice IS NOT TRUE AND COALESCE(q.quiz_type, '') != 'practice')
                       AND (q.is_archived IS NOT TRUE)
-                      AND q.department = $1
                     ORDER BY q.created_at DESC
-                `, [userDept]);
+                `);
                 quizzes = quizzesRes.rows.map(q => ({
                     ...q,
                     creator: { full_name: q.creator_name, email: q.creator_email }
@@ -1337,11 +1333,16 @@ router.get("/practice/quiz/:id", auth, async (req, res) => {
 
         const quizResult = await pool.query(
             `
-                SELECT id, title, COALESCE(subject, 'General') AS subject,
-                       COALESCE(total_marks, 0) AS total_marks,
-                       COALESCE(duration, 60) AS duration
-                FROM quizzes
-                WHERE id = $1
+                SELECT 
+                    q.id, 
+                    q.title, 
+                    COALESCE(s.name, 'General') AS subject,
+                    COALESCE(q.total_marks, 0) AS total_marks,
+                    COALESCE(q.duration, 60) AS duration
+                FROM quizzes q
+                LEFT JOIN course_offerings co ON co.id = q.course_offering_id
+                LEFT JOIN subjects s ON s.id = co.subject_id
+                WHERE q.id = $1
                 LIMIT 1;
             `,
             [id]
@@ -1372,7 +1373,22 @@ router.get("/practice/quiz/:id", auth, async (req, res) => {
                         ) ORDER BY mo.id
                       ) FILTER (WHERE mo.id IS NOT NULL),
                       '[]'::json
-                    ) AS options
+                    ) AS options,
+                    COALESCE(
+                      (
+                        SELECT json_agg(
+                          json_build_object(
+                            'id', tc.id,
+                            'input', tc.input,
+                            'output', tc.output,
+                            'is_hidden', tc.is_hidden
+                          ) ORDER BY tc.id
+                        )
+                        FROM test_cases tc
+                        WHERE tc.question_id = q.id
+                      ),
+                      '[]'::json
+                    ) AS test_cases
                 FROM quiz_questions_map qqm
                 JOIN questions q ON q.id = qqm.question_id
                 LEFT JOIN topics t ON t.id = q.topic_id
