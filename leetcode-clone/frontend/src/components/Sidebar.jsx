@@ -113,7 +113,7 @@ export default function Sidebar() {
             {/* Mobile Slide-Over Menu Drawer */}
             {isMobileOpen && (
                 <div 
-                    className="md:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex flex-col justify-between p-4 bg-[#0a0a0a] animate-in fade-in duration-200"
+                    className="md:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex flex-col justify-between p-4 animate-in fade-in duration-200"
                     onClick={(e) => {
                         if (e.target === e.currentTarget) setIsMobileOpen(false);
                     }}

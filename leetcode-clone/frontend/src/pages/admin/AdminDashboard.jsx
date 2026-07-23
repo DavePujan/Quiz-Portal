@@ -88,7 +88,7 @@ function StatCard({ title, value, icon, color, highlight }) {
             <div className="z-10 mt-2">
                 <p className="text-3xl sm:text-4xl font-extrabold text-white">{value}</p>
             </div>
-            <div className={`absolute right-[-20px] bottom-[-20px] w-24 h-24 bg-linear-to-br ${color} rounded-full group-hover:scale-110 transition-transform duration-300`}></div>
+            <div className={`absolute -right-5 -bottom-5 w-24 h-24 bg-linear-to-br ${color} rounded-full group-hover:scale-110 transition-transform duration-300`}></div>
         </div>
     );
 }

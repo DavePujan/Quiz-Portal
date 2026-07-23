@@ -163,10 +163,10 @@ const Practice = () => {
             )}
             {quiz.subject && (
               <span className="flex items-center gap-1">
-                <FileText size={12} className="text-purple-400" /><span className="truncate max-w-[120px]">{quiz.subject}</span>
+                <FileText size={12} className="text-purple-400" /><span className="truncate max-w-30">{quiz.subject}</span>
               </span>
             )}
-            {quiz.creator?.full_name && <span className="text-gray-500 truncate max-w-[140px]">By {quiz.creator.full_name}</span>}
+            {quiz.creator?.full_name && <span className="text-gray-500 truncate max-w-35">By {quiz.creator.full_name}</span>}
           </div>
 
           {isAttended && attempts.length > 0 && (

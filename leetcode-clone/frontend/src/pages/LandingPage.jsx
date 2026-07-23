@@ -148,7 +148,7 @@ export default function LandingPage() {
             </div>
 
             {/* Editor split */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[440px]">
+            <div className="grid grid-cols-1 lg:grid-cols-12 min-h-110">
               {/* Problem pane */}
               <div className="lg:col-span-4 p-6 border-b lg:border-b-0 lg:border-r border-white/5 text-left bg-[#121214]">
                 <Pill className="bg-blue-500/10 text-blue-400 border-0 mb-4 text-[10px]">DSA Midterm · Q1 of 5</Pill>
@@ -241,7 +241,7 @@ export default function LandingPage() {
             {/* Workflow with circles + connector */}
             <div className="relative">
               {/* SVG curved dotted connector line — hidden on mobile */}
-              <svg className="absolute top-[52px] left-0 w-full h-12 hidden md:block pointer-events-none" viewBox="0 0 1000 48" preserveAspectRatio="none">
+              <svg className="absolute top-13 left-0 w-full h-12 hidden md:block pointer-events-none" viewBox="0 0 1000 48" preserveAspectRatio="none">
                 <path
                   d="M 100,24 C 175,48 225,0 300,24 S 425,48 500,24 S 625,0 700,24 S 825,48 900,24"
                   fill="none"
@@ -271,7 +271,7 @@ export default function LandingPage() {
 
                     {/* Title + description */}
                     <h4 className="font-bold text-white text-sm mb-1">{step.title}</h4>
-                    <p className="text-[11px] text-gray-500 leading-relaxed max-w-[150px]">{step.desc}</p>
+                    <p className="text-[11px] text-gray-500 leading-relaxed max-w-37.5">{step.desc}</p>
                   </div>
                 ))}
               </div>

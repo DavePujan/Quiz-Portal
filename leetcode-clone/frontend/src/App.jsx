@@ -156,7 +156,7 @@ function NavBar() {
       {/* Mobile Slide-Over Menu Drawer matching Teacher Panel style */}
       {isMenuOpen && role === "student" && (
         <div 
-          className="md:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex flex-col justify-between p-4 bg-[#0a0a0a] animate-in fade-in duration-200"
+          className="md:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex flex-col justify-between p-4 animate-in fade-in duration-200"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsMenuOpen(false);
           }}

@@ -970,11 +970,7 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
             is_practice: isPracticeFlag,
             institution_id: resolvedInstitutionId,
             course_offering_id: resolvedCourseOfferingId,
-            subject_id: resolvedSubjectId,
-            subject: resolvedSubject,
-            created_by: userId,
-            department: resolvedDepartment,
-            semester: resolvedSemester
+            created_by: userId
         };
 
         // 1. Create Quiz

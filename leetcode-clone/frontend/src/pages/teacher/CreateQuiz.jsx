@@ -658,6 +658,8 @@ export default function CreateQuiz() {
 
 // AI Sidebar Component
 function AiSidebar({ onPopulateForm, onClose, isOpen }) {
+    if (!isOpen) return null;
+
     const [prompt, setPrompt] = useState("");
     const [loading, setLoading] = useState(false);
     const [generatedQuestions, setGeneratedQuestions] = useState([]);
@@ -729,13 +731,13 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
             {/* Backdrop Overlay */}
             {isOpen && (
                 <div 
-                    className="fixed inset-0 bg-black/70 backdrop-blur-xs z-[55] transition-opacity"
+                    className="fixed inset-0 bg-black/70 backdrop-blur-xs z-55 transition-opacity"
                     onClick={onClose}
                 />
             )}
 
             {/* Sidebar Drawer */}
-            <div className={`fixed right-0 top-0 bottom-0 h-full w-full sm:w-112 md:w-125 max-w-full bg-[#18181b] border-l border-gray-700 shadow-2xl z-[60] transform transition-transform duration-300 ease-in-out flex flex-col overflow-x-hidden ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+            <div className={`fixed right-0 top-0 bottom-0 h-full w-full sm:w-md md:w-125 max-w-full bg-[#18181b] border-l border-gray-700 shadow-2xl z-60 transform transition-transform duration-300 ease-in-out flex flex-col overflow-x-hidden ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-[#252526] shrink-0">
                     <h3 className="text-base sm:text-lg font-bold text-transparent bg-clip-text bg-linear-to-r from-purple-400 to-pink-600 flex items-center">
                         <Sparkles className="w-5 h-5 mr-2 text-purple-400 shrink-0" /> AI Assistant
@@ -822,9 +824,9 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
 
                                     <div className="space-y-3 pt-2">
                                         {generatedQuestions.map((q, i) => (
-                                            <div key={i} className="bg-[#2a2a2b] border border-gray-700 rounded-lg p-3 sm:p-3.5 relative group break-words min-w-0">
+                                            <div key={i} className="bg-[#2a2a2b] border border-gray-700 rounded-lg p-3 sm:p-3.5 relative group wrap-break-word min-w-0">
                                                 <div className="pr-16 cursor-pointer" onClick={() => toggleExpand(i)}>
-                                                    <p className="font-semibold text-xs sm:text-sm text-white leading-snug break-words">{q.question}</p>
+                                                    <p className="font-semibold text-xs sm:text-sm text-white leading-snug wrap-break-word">{q.question}</p>
                                                     <p className="text-[10px] sm:text-xs text-gray-400 mt-1 uppercase font-bold tracking-wider">{q.type} • {q.marks} Marks</p>
                                                 </div>
 
@@ -844,11 +846,11 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
                                                 </div>
 
                                                 {expandedQ === i && (
-                                                    <div className="mt-3 pt-3 border-t border-gray-700/80 text-xs text-gray-300 space-y-2 break-words">
+                                                    <div className="mt-3 pt-3 border-t border-gray-700/80 text-xs text-gray-300 space-y-2 wrap-break-word">
                                                         {q.type === 'mcq' && (
                                                             <>
-                                                                <p className="break-words"><span className="text-gray-400 font-medium">Options:</span> {q.options?.join(", ")}</p>
-                                                                <p className="break-words"><span className="text-green-400 font-bold">Answer:</span> {q.answer}</p>
+                                                                <p className="wrap-break-word"><span className="text-gray-400 font-medium">Options:</span> {q.options?.join(", ")}</p>
+                                                                <p className="wrap-break-word"><span className="text-green-400 font-bold">Answer:</span> {q.answer}</p>
                                                             </>
                                                         )}
                                                         {q.type === 'code' && (
@@ -857,8 +859,8 @@ function AiSidebar({ onPopulateForm, onClose, isOpen }) {
                                                                     <p><span className="text-gray-400 font-medium">Lang:</span> {q.language}</p>
                                                                     <p><span className="text-gray-400 font-medium">Function:</span> <span className="font-mono text-yellow-400">{q.functionName || "N/A"}</span></p>
                                                                 </div>
-                                                                <p className="text-[11px] break-words"><span className="text-gray-400 font-medium">Input:</span> {q.inputFormat}</p>
-                                                                <p className="text-[11px] break-words"><span className="text-gray-400 font-medium">Output:</span> {q.outputFormat}</p>
+                                                                <p className="text-[11px] wrap-break-word"><span className="text-gray-400 font-medium">Input:</span> {q.inputFormat}</p>
+                                                                <p className="text-[11px] wrap-break-word"><span className="text-gray-400 font-medium">Output:</span> {q.outputFormat}</p>
                                                                 <div className="bg-[#1e1e1f] p-2 rounded-md border border-gray-800">
                                                                     <p className="text-gray-400 mb-1 font-bold text-[10px] uppercase">Test Cases:</p>
                                                                     {q.testCases?.map((tc, idx) => (
