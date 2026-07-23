@@ -843,10 +843,14 @@ router.post("/ai/generate", auth, authorize('teacher'), aiLimiter, async (req, r
 });
 
 async function ensureQuizIsPracticeColumn() {
-    await pool.query(`
-        ALTER TABLE quizzes
-        ADD COLUMN IF NOT EXISTS is_practice BOOLEAN DEFAULT false;
-    `);
+    try {
+        await pool.query(`
+            ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS is_practice BOOLEAN DEFAULT false;
+            ALTER TABLE quizzes ALTER COLUMN course_offering_id DROP NOT NULL;
+        `);
+    } catch (e) {
+        console.warn("Notice: could not alter quizzes course_offering_id constraint:", e.message);
+    }
 }
 
 // Unified Quiz Creation
@@ -980,6 +984,40 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
 
         if (!isPracticeFlag && !resolvedSubjectId && !resolvedCourseOfferingId) {
             return res.status(400).json({ error: "Please select a Subject or Course Offering for this quiz." });
+        }
+
+        // If courseOfferingId is still null (e.g. for practice quizzes), resolve an existing offering as fallback
+        if (!resolvedCourseOfferingId) {
+            const { data: existingOffering } = await supabase
+                .from("course_offerings")
+                .select("id")
+                .eq("teacher_id", userId)
+                .limit(1)
+                .maybeSingle();
+
+            if (existingOffering?.id) {
+                resolvedCourseOfferingId = existingOffering.id;
+            } else {
+                const { data: instOffering } = await supabase
+                    .from("course_offerings")
+                    .select("id")
+                    .eq("institution_id", resolvedInstitutionId)
+                    .limit(1)
+                    .maybeSingle();
+
+                if (instOffering?.id) {
+                    resolvedCourseOfferingId = instOffering.id;
+                } else {
+                    const { data: anyOffering } = await supabase
+                        .from("course_offerings")
+                        .select("id")
+                        .limit(1)
+                        .maybeSingle();
+                    if (anyOffering?.id) {
+                        resolvedCourseOfferingId = anyOffering.id;
+                    }
+                }
+            }
         }
 
         let insertPayload = {
