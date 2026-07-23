@@ -3,8 +3,6 @@ const pool = require("../db");
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-const pool = require("../db");
-
 // Fast in-memory TTL cache to eliminate 3-second Supabase REST roundtrips per API request
 const institutionContextCache = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes

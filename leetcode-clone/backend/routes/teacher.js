@@ -174,14 +174,23 @@ router.get("/academics", auth, authorize('teacher'), requireInstitutionContext, 
             pool.query(`
                 SELECT at.id, at.term_number AS semester_no, at.term_type, at.program_id, p.department_id
                 FROM academic_terms at
-                JOIN programs p ON p.id = at.program_id
+                LEFT JOIN programs p ON p.id = at.program_id
                 ORDER BY at.term_number, at.id
             `),
             pool.query(`
-                SELECT s.id, s.code, s.name, p.department_id, s.academic_term_id AS semester_id, s.program_id, s.institution_id
+                SELECT 
+                    s.id, 
+                    s.code, 
+                    s.name, 
+                    p.department_id, 
+                    s.academic_term_id AS semester_id, 
+                    at.term_number AS semester_no, 
+                    s.program_id, 
+                    s.institution_id
                 FROM subjects s
-                JOIN programs p ON p.id = s.program_id
-                ORDER BY s.name
+                LEFT JOIN programs p ON p.id = s.program_id
+                LEFT JOIN academic_terms at ON at.id = s.academic_term_id
+                ORDER BY s.code NULLS LAST, s.name
             `),
             pool.query(`
                 SELECT 
@@ -874,16 +883,33 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
         if (!profile) throw new Error(`Profile not found for user: ${req.user.email} (Error: ${error?.message})`);
         const userId = profile.id;
 
-        // New clients submit subjectId. Resolve its display values too while older
-        // clients can continue submitting subject/department/semester text.
+        // New clients submit subjectId or courseOfferingId. Resolve display & relational values.
         let resolvedSubjectId = subjectId || null;
         let resolvedSubject = subject || null;
         let resolvedDepartment = department || profile?.department || null;
         let resolvedSemester = semester || null;
         let resolvedInstitutionId = null;
-        let resolvedCourseOfferingId = null;
+        let resolvedCourseOfferingId = courseOfferingId || null;
 
-        if (resolvedSubjectId) {
+        if (resolvedCourseOfferingId) {
+            const { data: co } = await supabase
+                .from("course_offerings")
+                .select("institution_id, teacher_id, subject_id, subjects(name, programs(departments(name)), academic_terms(term_number))")
+                .eq("id", resolvedCourseOfferingId)
+                .maybeSingle();
+
+            if (co) {
+                resolvedInstitutionId = co.institution_id || null;
+                if (!resolvedSubjectId && co.subject_id) {
+                    resolvedSubjectId = co.subject_id;
+                    resolvedSubject = co.subjects?.name || resolvedSubject;
+                    resolvedDepartment = co.subjects?.programs?.departments?.name || resolvedDepartment;
+                    resolvedSemester = co.subjects?.academic_terms?.term_number?.toString() || resolvedSemester;
+                }
+            }
+        }
+
+        if (resolvedSubjectId && !resolvedCourseOfferingId) {
             const { data: subjectRecord, error: subjectError } = await supabase
                 .from("subjects")
                 .select("id, name, institution_id, program_id, academic_term_id, programs(department_id, departments(name)), academic_terms(term_number, term_type), institutions(name)")
@@ -930,6 +956,10 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
             }
         }
 
+        if (!isPracticeFlag && !resolvedSubjectId && !resolvedCourseOfferingId) {
+            return res.status(400).json({ error: "Please select a Subject or Course Offering for this quiz." });
+        }
+
         let insertPayload = {
             title,
             duration,
@@ -937,40 +967,15 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
             description,
             quiz_type: "hybrid",
             scheduled_at: scheduledAt || new Date(),
-            is_practice: isPracticeFlag
+            is_practice: isPracticeFlag,
+            institution_id: resolvedInstitutionId,
+            course_offering_id: resolvedCourseOfferingId,
+            subject_id: resolvedSubjectId,
+            subject: resolvedSubject,
+            created_by: userId,
+            department: resolvedDepartment,
+            semester: resolvedSemester
         };
-
-        if (FEATURES.NEW_ACADEMIC_MODEL) {
-            if (!isPracticeFlag && !courseOfferingId) throw new Error("courseOfferingId is required in new academic model");
-            
-            // Runtime Tenant & Ownership Verification
-            if (courseOfferingId) {
-                const { data: co } = await supabase
-                    .from("course_offerings")
-                    .select("institution_id, teacher_id")
-                    .eq("id", courseOfferingId)
-                    .single();
-                if (!co) throw new Error("Invalid courseOfferingId");
-                if (co.teacher_id !== userId) throw new Error("Unauthorized: You do not own this course offering");
-
-                insertPayload = {
-                    ...insertPayload,
-                    institution_id: co.institution_id,
-                    course_offering_id: courseOfferingId
-                };
-            }
-        } else {
-            insertPayload = {
-                ...insertPayload,
-                institution_id: resolvedInstitutionId,
-                course_offering_id: resolvedCourseOfferingId,
-                subject_id: resolvedSubjectId,
-                subject: resolvedSubject,
-                created_by: userId,
-                department: resolvedDepartment,
-                semester: resolvedSemester
-            };
-        }
 
         // 1. Create Quiz
         const { data: quiz, error: quizError } = await supabase

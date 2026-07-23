@@ -95,16 +95,35 @@ export default function CreateQuiz() {
     }, [academicCatalog.semesters, quizDetails.departmentId]);
 
     const availableSubjects = React.useMemo(() => {
-        if (!quizDetails.departmentId || !quizDetails.semesterId) return [];
-        const selectedSemNo = Number(quizDetails.semesterId);
-        
-        return academicCatalog.subjects?.filter((subject) => {
-            const matchDept = !subject.department_id || String(subject.department_id) === String(quizDetails.departmentId);
-            const subjectSemNo = Number(subject.semester_no || subject.term_number || subject.academic_term_id);
-            const matchSem = subjectSemNo === selectedSemNo || String(subject.semester_id) === String(quizDetails.semesterId);
-            return matchDept && matchSem;
-        }) || [];
-    }, [academicCatalog.subjects, quizDetails.departmentId, quizDetails.semesterId]);
+        if (!quizDetails.departmentId) return [];
+        const selectedDeptId = String(quizDetails.departmentId);
+        const selectedSemNo = quizDetails.semesterId ? Number(quizDetails.semesterId) : null;
+
+        const matchingSemTermIds = new Set(
+            (academicCatalog.semesters || [])
+                .filter(s => selectedSemNo && Number(s.semester_no || s.term_number) === selectedSemNo)
+                .map(s => String(s.id))
+        );
+
+        const filtered = (academicCatalog.subjects || []).filter((subject) => {
+            const matchDept = !subject.department_id || String(subject.department_id) === selectedDeptId;
+            if (!matchDept) return false;
+            
+            if (!selectedSemNo) return true; // If semester is not selected yet, include department subjects
+
+            const subjectSemNo = Number(subject.semester_no || subject.term_number);
+            const matchSem = subjectSemNo === selectedSemNo 
+                || (subject.semester_id && matchingSemTermIds.has(String(subject.semester_id)));
+            return matchSem;
+        });
+
+        if (filtered.length > 0) return filtered;
+
+        // Fallback: If strict semester matching returns 0 items, return all subjects for this department
+        return (academicCatalog.subjects || []).filter(subject => 
+            !subject.department_id || String(subject.department_id) === selectedDeptId
+        );
+    }, [academicCatalog.subjects, academicCatalog.semesters, quizDetails.departmentId, quizDetails.semesterId]);
 
     const useNewAcademicModel = FEATURES.NEW_ACADEMIC_MODEL;
 
