@@ -1380,11 +1380,11 @@ router.get("/practice/quiz/:id", auth, async (req, res) => {
                           json_build_object(
                             'id', tc.id,
                             'input', tc.input,
-                            'output', tc.output,
+                            'output', tc.expected_output,
                             'is_hidden', tc.is_hidden
                           ) ORDER BY tc.id
                         )
-                        FROM test_cases tc
+                        FROM testcases tc
                         WHERE tc.question_id = q.id
                       ),
                       '[]'::json
