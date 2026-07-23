@@ -876,19 +876,41 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
         // Fetch valid UUID from Supabase profiles
         const { data: profile, error } = await supabase
             .from("profiles")
-            .select("id, department")
-            .ilike("email", req.user.email) // Changed to ilike for case-insensitivity
+            .select("id, department, institution_id")
+            .ilike("email", req.user.email)
             .single();
 
         if (!profile) throw new Error(`Profile not found for user: ${req.user.email} (Error: ${error?.message})`);
         const userId = profile.id;
+
+        // Resolve teacher's institution ID with rock-solid fallbacks
+        let teacherInstitutionId = req.context?.institutionId || profile?.institution_id || null;
+
+        if (!teacherInstitutionId) {
+            const { data: member } = await supabase
+                .from("institution_memberships")
+                .select("institution_id")
+                .eq("user_id", userId)
+                .eq("is_active", true)
+                .maybeSingle();
+            teacherInstitutionId = member?.institution_id || null;
+        }
+
+        if (!teacherInstitutionId) {
+            const { data: defaultInst } = await supabase
+                .from("institutions")
+                .select("id")
+                .limit(1)
+                .maybeSingle();
+            teacherInstitutionId = defaultInst?.id || 1;
+        }
 
         // New clients submit subjectId or courseOfferingId. Resolve display & relational values.
         let resolvedSubjectId = subjectId || null;
         let resolvedSubject = subject || null;
         let resolvedDepartment = department || profile?.department || null;
         let resolvedSemester = semester || null;
-        let resolvedInstitutionId = null;
+        let resolvedInstitutionId = teacherInstitutionId;
         let resolvedCourseOfferingId = courseOfferingId || null;
 
         if (resolvedCourseOfferingId) {
@@ -899,7 +921,7 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
                 .maybeSingle();
 
             if (co) {
-                resolvedInstitutionId = co.institution_id || null;
+                resolvedInstitutionId = co.institution_id || resolvedInstitutionId;
                 if (!resolvedSubjectId && co.subject_id) {
                     resolvedSubjectId = co.subject_id;
                     resolvedSubject = co.subjects?.name || resolvedSubject;
@@ -922,7 +944,7 @@ router.post("/quiz/full", auth, authorize('teacher'), aiLimiter, async (req, res
 
             resolvedSubjectId = subjectRecord.id;
             resolvedSubject = subjectRecord.name;
-            resolvedInstitutionId = subjectRecord.institution_id || null;
+            resolvedInstitutionId = subjectRecord.institution_id || resolvedInstitutionId;
             resolvedDepartment = subjectRecord.programs?.departments?.name || resolvedDepartment;
             resolvedSemester = subjectRecord.academic_terms?.term_number?.toString() || resolvedSemester;
 
